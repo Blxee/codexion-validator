@@ -28,8 +28,10 @@ fn main() {
     };
 
     let program_output = run_command(program_path, codexion_args, Duration::from_secs(1)).unwrap();
-    let i: CodexionOutput = (&(codexion_args, program_output)).try_into().unwrap();
-    dbg!(i);
+    let i: CodexionOutput = match (&(codexion_args, program_output)).try_into() {
+        Ok(i) => dbg!(i),
+        Err(e) => return println!("{e}"),
+    };
 }
 
 fn run_command(
