@@ -126,11 +126,28 @@ impl CodexionState {
         }
         // update state
         self.last_timestamp = timestamp;
+        self.update_coder(coder_id, action, timestamp);
+        self.update_dongles(coder_id, action, timestamp);
+
+        Ok(())
+    }
+
+    fn update_coder(&mut self, coder_id: i32, action: Action, timestamp: Duration) {
         let index = self.id_to_index(coder_id);
         let coder = &mut self.coders[index];
         coder.last_action = Some(action);
         coder.last_action_timestamp = Some(timestamp);
-        // update dongle related state
+
+        match action {
+            Action::DongleTaken => coder.dongles_in_hand += 1,
+            Action::Debug => coder.dongles_in_hand = 0,
+            _ => (),
+        }
+    }
+
+    fn update_dongles(&mut self, coder_id: i32, action: Action, timestamp: Duration) {
+        let index = self.id_to_index(coder_id);
+        let coder = &self.coders[index];
         let (left_dongle, right_dongle) = if index < self.dongles.len() - 1 {
             let (first, second) = self.dongles.split_at_mut(index + 1);
             (&mut first[index], &mut second[0])
@@ -140,16 +157,23 @@ impl CodexionState {
         };
 
         match action {
-            Action::DongleTaken => coder.dongles_in_hand += 1,
+            Action::DongleTaken => {
+                if coder.dongles_in_hand == 2 {
+                    left_dongle.state = DongleState::Held;
+                    right_dongle.state = DongleState::Held;
+                }
+            }
             Action::Compile => {
                 left_dongle.state = DongleState::Held;
                 right_dongle.state = DongleState::Held;
             }
-            Action::Debug => coder.dongles_in_hand = 0,
+            Action::Debug => {
+                let time_to_cooldown = Duration::from_millis(self.args.dongle_cooldown as u64);
+                left_dongle.state = DongleState::CoolingDownUntil(timestamp + time_to_cooldown);
+                right_dongle.state = DongleState::CoolingDownUntil(timestamp + time_to_cooldown);
+            }
             _ => (),
         }
-
-        Ok(())
     }
 
     fn id_to_index(&self, id: i32) -> usize {
