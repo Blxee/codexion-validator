@@ -1,3 +1,4 @@
+mod behaviour;
 mod parsing;
 use std::{
     arch::asm,
@@ -16,7 +17,7 @@ fn main() {
         return eprintln!("Error: wrong argument count");
     };
 
-    let codexion_args = Args {
+    let codexion_args = CodexionInput {
         number_of_coders: 3,
         time_to_burnout: 3000,
         time_to_compile: 1000,
@@ -28,7 +29,7 @@ fn main() {
     };
 
     let program_output = run_command(program_path, codexion_args, Duration::from_secs(1)).unwrap();
-    let i: CodexionOutput = match (&(codexion_args, program_output)).try_into() {
+    let i: CodexionOutput = match (&program_output).try_into() {
         Ok(i) => dbg!(i),
         Err(e) => return println!("{e}"),
     };
@@ -36,7 +37,7 @@ fn main() {
 
 fn run_command(
     program: &str,
-    args: Args,
+    args: CodexionInput,
     timeout: Duration,
 ) -> Result<ProgramOutput, Box<dyn Error>> {
     let output = Command::new(program).args(args.to_vec()).output()?;
@@ -58,7 +59,7 @@ struct ProgramOutput {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct Args {
+pub struct CodexionInput {
     number_of_coders: i32,
     time_to_burnout: i32,
     time_to_compile: i32,
@@ -75,7 +76,7 @@ pub enum Scheduler {
     EDF,
 }
 
-impl Args {
+impl CodexionInput {
     fn to_vec(&self) -> Vec<String> {
         vec![
             self.number_of_coders.to_string(),

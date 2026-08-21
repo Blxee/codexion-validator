@@ -1,23 +1,24 @@
 use std::{error::Error, fmt::Display, time::Duration};
 
-use crate::{Args, ProgramOutput};
+use crate::ProgramOutput;
 
 #[derive(Debug)]
 pub struct CodexionOutput {
-    args: Args,
     events: Vec<Event>,
     duration: Duration,
 }
 
 #[derive(Debug)]
-struct Event {
-    timestamp: Duration,
-    coder_id: i32,
-    action: Action,
+pub struct Event {
+    pub timestamp: Duration,
+    pub coder_id: i32,
+    pub action: Action,
+    pub line: String,
+    pub line_number: usize,
 }
 
 #[derive(Debug)]
-enum Action {
+pub enum Action {
     DongleTaken,
     Compile,
     Debug,
@@ -28,7 +29,7 @@ enum Action {
 #[derive(Debug)]
 pub struct OutputParsingError {
     line: String,
-    number: usize,
+    line_number: usize,
     kind: ParsingErrorKind,
 }
 
@@ -36,87 +37,101 @@ pub struct OutputParsingError {
 pub enum ParsingErrorKind {
     InvalidFormat { fields: usize },
     MissingColon,
-    InavlidTimestamp,
+    InvalidTimestamp,
     InvalidCoderID,
     InvalidAction,
 }
 
 impl Error for OutputParsingError {}
 
-impl TryFrom<&(Args, ProgramOutput)> for CodexionOutput {
+impl TryFrom<&ProgramOutput> for CodexionOutput {
     type Error = OutputParsingError;
 
-    fn try_from((args, output): &(Args, ProgramOutput)) -> Result<Self, Self::Error> {
+    fn try_from(output: &ProgramOutput) -> Result<Self, Self::Error> {
         let mut events = Vec::new();
 
         for (number, line) in output.stdout.lines().enumerate() {
-            let spans = line.splitn(3, ' ').collect::<Vec<&str>>();
-            let [timestamp, coder_id, action] = spans.as_slice() else {
-                return Err(OutputParsingError {
-                    line: line.to_string(),
-                    number,
-                    kind: ParsingErrorKind::InvalidFormat {
-                        fields: spans.len(),
-                    },
-                });
-            };
-
-            let timestamp = Duration::from_millis(
-                timestamp
-                    .strip_suffix(':')
-                    .ok_or(OutputParsingError {
-                        line: line.to_string(),
-                        number,
-                        kind: ParsingErrorKind::MissingColon,
-                    })?
-                    .parse()
-                    .map_err(|_| OutputParsingError {
-                        line: line.to_string(),
-                        number,
-                        kind: ParsingErrorKind::InavlidTimestamp,
-                    })?,
-            );
-
-            let coder_id = coder_id.parse().map_err(|_| OutputParsingError {
-                line: line.to_string(),
-                number,
-                kind: ParsingErrorKind::InvalidCoderID,
+            let mut event: Event = line.try_into().map_err(|mut err: OutputParsingError| {
+                err.line_number = number;
+                err
             })?;
-
-            if coder_id < 0 {
-                return Err(OutputParsingError {
-                    line: line.to_string(),
-                    number,
-                    kind: ParsingErrorKind::InvalidCoderID,
-                });
-            }
-
-            let action = match *action {
-                "has taken a dongle" => Action::DongleTaken,
-                "is compiling" => Action::Compile,
-                "is debugging" => Action::Debug,
-                "is refactoring" => Action::Refactor,
-                "burned out" => Action::BurnOut,
-                _ => {
-                    return Err(OutputParsingError {
-                        line: line.to_string(),
-                        number,
-                        kind: ParsingErrorKind::InvalidAction,
-                    });
-                }
-            };
-
-            events.push(Event {
-                timestamp,
-                coder_id,
-                action,
-            });
+            event.line_number = number;
+            events.push(event);
         }
 
         Ok(CodexionOutput {
-            args: *args,
             events,
             duration: output.duration,
+        })
+    }
+}
+
+impl TryFrom<&str> for Event {
+    type Error = OutputParsingError;
+
+    fn try_from(line: &str) -> Result<Self, Self::Error> {
+        let spans = line.splitn(3, ' ').collect::<Vec<&str>>();
+        let [timestamp, coder_id, action] = spans.as_slice() else {
+            return Err(OutputParsingError {
+                line: line.to_string(),
+                line_number: 0,
+                kind: ParsingErrorKind::InvalidFormat {
+                    fields: spans.len(),
+                },
+            });
+        };
+
+        let timestamp = Duration::from_millis(
+            timestamp
+                .strip_suffix(':')
+                .ok_or(OutputParsingError {
+                    line: line.to_string(),
+                    line_number: 0,
+                    kind: ParsingErrorKind::MissingColon,
+                })?
+                .parse()
+                .map_err(|_| OutputParsingError {
+                    line: line.to_string(),
+                    line_number: 0,
+                    kind: ParsingErrorKind::InvalidTimestamp,
+                })?,
+        );
+
+        let coder_id = coder_id.parse().map_err(|_| OutputParsingError {
+            line: line.to_string(),
+            line_number: 0,
+            kind: ParsingErrorKind::InvalidCoderID,
+        })?;
+
+        if coder_id <= 0 {
+            return Err(OutputParsingError {
+                line: line.to_string(),
+                line_number: 0,
+                kind: ParsingErrorKind::InvalidCoderID,
+            });
+        }
+
+        let action = match *action {
+            "has taken a dongle" => Action::DongleTaken,
+            "is compiling" => Action::Compile,
+            "is debugging" => Action::Debug,
+            "is refactoring" => Action::Refactor,
+            "burned out" => Action::BurnOut,
+            _ => {
+                return Err(OutputParsingError {
+                    line: line.to_string(),
+                    line_number: 0,
+                    kind: ParsingErrorKind::InvalidAction,
+                });
+            }
+        };
+
+        Ok(Event {
+            timestamp,
+            coder_id,
+            action,
+            line: line.to_string(),
+            line_number: 0,
         })
     }
 }
@@ -127,7 +142,7 @@ impl Display for OutputParsingError {
                 ParsingErrorKind::InvalidFormat { fields } =>
                     format!("expected 3 parts (timestamp: coder_id action) but found {fields}"),
                 ParsingErrorKind::MissingColon => "missing colon ':' after timestamp".to_string(),
-                ParsingErrorKind::InavlidTimestamp =>
+                ParsingErrorKind::InvalidTimestamp =>
                     "could not parse timestamp into a valid unsigned long".to_string(),
                 ParsingErrorKind::InvalidCoderID =>
                     "could not parse coder id into a valid positive integer".to_string(),
@@ -137,7 +152,7 @@ impl Display for OutputParsingError {
         write!(
             f,
             "[Error at line {}]: '{}'\n{}",
-            self.number, self.line, kind,
+            self.line_number, self.line, kind,
         )
     }
 }
