@@ -4,7 +4,7 @@ use crate::ProgramOutput;
 
 #[derive(Debug)]
 pub struct CodexionOutput {
-    events: Vec<Event>,
+    pub events: Vec<Event>,
     duration: Duration,
 }
 
@@ -17,7 +17,7 @@ pub struct Event {
     pub line_number: usize,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     DongleTaken,
     Compile,

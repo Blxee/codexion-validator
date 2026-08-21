@@ -5,44 +5,72 @@ use crate::{
     parsing::{Action, Event},
 };
 
-struct CodexionState {
+pub struct CodexionState {
     args: CodexionInput,
     coders: Vec<Coder>,
     dongles: Vec<Dongle>,
     last_timestamp: Duration,
+    burn_out_reached: bool,
 }
 
 struct Coder {
     id: i32,
+    last_action: Option<Action>,
+    last_action_timestamp: Option<Duration>,
+    dongles_in_hand: u32,
 }
 
 struct Dongle {
     id: i32,
+    state: DongleState,
+}
+
+enum DongleState {
+    Unknown,
+    Available,
+    Held,
+    CoolingDownUntil(Duration),
 }
 
 #[derive(Debug)]
-struct BehaviourError {
-    line: String,
-    line_number: usize,
-    kind: BehaviourErrorKind,
+pub struct BehaviourError {
+    pub line: String,
+    pub line_number: usize,
+    pub kind: BehaviourErrorKind,
 }
 
 #[derive(Debug)]
-enum BehaviourErrorKind {
+pub enum BehaviourErrorKind {
     UnsycronizedTimestamps,
     InvalidCoderId { max_id: i32, found: i32 },
+    CoderTookADongleOutLfOrder,
+    CoderTookMoreThanTwoDongles,
 }
 
 impl Error for BehaviourError {}
 
+impl Coder {
+    fn from_id(id: i32) -> Self {
+        Self {
+            id,
+            last_action: None,
+            last_action_timestamp: None,
+            dongles_in_hand: 0,
+        }
+    }
+}
+
 impl CodexionState {
-    fn from(args: CodexionInput) -> Self {
+    pub fn from(args: CodexionInput) -> Self {
         let mut coders = Vec::with_capacity(args.number_of_coders as usize);
         let mut dongles = Vec::with_capacity(args.number_of_coders as usize);
 
         for id in 0..args.number_of_coders {
-            coders.push(Coder { id });
-            dongles.push(Dongle { id });
+            coders.push(Coder::from_id(id));
+            dongles.push(Dongle {
+                id,
+                state: DongleState::Available,
+            });
         }
 
         Self {
@@ -50,6 +78,7 @@ impl CodexionState {
             coders,
             dongles,
             last_timestamp: Duration::ZERO,
+            burn_out_reached: false,
         }
     }
 
@@ -63,6 +92,7 @@ impl CodexionState {
             line_number,
         }: Event,
     ) -> Result<(), BehaviourError> {
+        // validate common event attributes
         if timestamp < self.last_timestamp {
             return Err(BehaviourError {
                 line,
@@ -70,9 +100,7 @@ impl CodexionState {
                 kind: BehaviourErrorKind::UnsycronizedTimestamps,
             });
         }
-        self.last_timestamp = timestamp;
-
-        if coder_id >= self.args.number_of_coders {
+        if coder_id > self.args.number_of_coders {
             return Err(BehaviourError {
                 line,
                 line_number,
@@ -82,56 +110,50 @@ impl CodexionState {
                 },
             });
         }
+        // validate behaviour/logic according to action
+        if let Err(kind) = match action {
+            Action::DongleTaken => self.validate_dongle_taking(coder_id, timestamp),
+            Action::Compile => self.validate_compiling(coder_id, timestamp),
+            Action::Debug => self.validate_debugging(coder_id, timestamp),
+            Action::Refactor => self.validate_refactoring(coder_id, timestamp),
+            Action::BurnOut => self.validate_burning_out(coder_id, timestamp),
+        } {
+            return Err(BehaviourError {
+                line,
+                line_number,
+                kind,
+            });
+        }
+        // update state
+        self.last_timestamp = timestamp;
+        let index = self.id_to_index(coder_id);
+        let coder = &mut self.coders[index];
+        coder.last_action = Some(action);
+        coder.last_action_timestamp = Some(timestamp);
+        // update dongle related state
+        let (left_dongle, right_dongle) = if index < self.dongles.len() - 1 {
+            let (first, second) = self.dongles.split_at_mut(index + 1);
+            (&mut first[index], &mut second[0])
+        } else {
+            let (first, second) = self.dongles.split_at_mut(index);
+            (&mut second[0], &mut first[0])
+        };
 
         match action {
-            Action::DongleTaken => {
-                if let Err(kind) = self.validate_dongle_taking(coder_id, timestamp) {
-                    return Err(BehaviourError {
-                        line,
-                        line_number,
-                        kind,
-                    });
-                }
-            }
+            Action::DongleTaken => coder.dongles_in_hand += 1,
             Action::Compile => {
-                if let Err(kind) = self.validate_compiling(coder_id, timestamp) {
-                    return Err(BehaviourError {
-                        line,
-                        line_number,
-                        kind,
-                    });
-                }
+                left_dongle.state = DongleState::Held;
+                right_dongle.state = DongleState::Held;
             }
-            Action::Debug => {
-                if let Err(kind) = self.validate_debugging(coder_id, timestamp) {
-                    return Err(BehaviourError {
-                        line,
-                        line_number,
-                        kind,
-                    });
-                }
-            }
-            Action::Refactor => {
-                if let Err(kind) = self.validate_refactoring(coder_id, timestamp) {
-                    return Err(BehaviourError {
-                        line,
-                        line_number,
-                        kind,
-                    });
-                }
-            }
-            Action::BurnOut => {
-                if let Err(kind) = self.validate_burning_out(coder_id, timestamp) {
-                    return Err(BehaviourError {
-                        line,
-                        line_number,
-                        kind,
-                    });
-                }
-            }
+            Action::Debug => coder.dongles_in_hand = 0,
+            _ => (),
         }
 
         Ok(())
+    }
+
+    fn id_to_index(&self, id: i32) -> usize {
+        (id - 1) as usize
     }
 
     fn validate_dongle_taking(
@@ -139,7 +161,19 @@ impl CodexionState {
         coder_id: i32,
         timestamp: Duration,
     ) -> Result<(), BehaviourErrorKind> {
-        todo!()
+        let coder = &self.coders[self.id_to_index(coder_id)];
+
+        if let Some(last_action) = coder.last_action {
+            if ![Action::Refactor, Action::DongleTaken].contains(&last_action) {
+                return Err(BehaviourErrorKind::CoderTookADongleOutLfOrder);
+            }
+        }
+
+        if coder.dongles_in_hand >= 2 {
+            return Err(BehaviourErrorKind::CoderTookMoreThanTwoDongles);
+        }
+
+        Ok(())
     }
 
     fn validate_compiling(
@@ -147,7 +181,7 @@ impl CodexionState {
         coder_id: i32,
         timestamp: Duration,
     ) -> Result<(), BehaviourErrorKind> {
-        todo!()
+        Ok(())
     }
 
     fn validate_debugging(
@@ -155,7 +189,7 @@ impl CodexionState {
         coder_id: i32,
         timestamp: Duration,
     ) -> Result<(), BehaviourErrorKind> {
-        todo!()
+        Ok(())
     }
 
     fn validate_refactoring(
@@ -163,7 +197,7 @@ impl CodexionState {
         coder_id: i32,
         timestamp: Duration,
     ) -> Result<(), BehaviourErrorKind> {
-        todo!()
+        Ok(())
     }
 
     fn validate_burning_out(
@@ -171,7 +205,7 @@ impl CodexionState {
         coder_id: i32,
         timestamp: Duration,
     ) -> Result<(), BehaviourErrorKind> {
-        todo!()
+        Ok(())
     }
 }
 

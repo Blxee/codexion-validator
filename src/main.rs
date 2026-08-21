@@ -8,7 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::parsing::CodexionOutput;
+use crate::{behaviour::CodexionState, parsing::CodexionOutput};
 
 fn main() {
     let args = args().collect::<Vec<_>>();
@@ -29,10 +29,18 @@ fn main() {
     };
 
     let program_output = run_command(program_path, codexion_args, Duration::from_secs(1)).unwrap();
-    let i: CodexionOutput = match (&program_output).try_into() {
-        Ok(i) => dbg!(i),
-        Err(e) => return println!("{e}"),
+    println!("output: {}", &program_output.stdout);
+
+    let codexion_output: CodexionOutput = match (&program_output).try_into() {
+        Ok(res) => res,
+        Err(err) => return println!("{err}"),
     };
+
+    let mut state = CodexionState::from(codexion_args);
+
+    for event in codexion_output.events {
+        state.update(event).unwrap();
+    }
 }
 
 fn run_command(
