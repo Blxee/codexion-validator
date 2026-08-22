@@ -11,7 +11,7 @@ pub struct CodexionOutput {
 #[derive(Debug)]
 pub struct Event {
     pub timestamp: Duration,
-    pub coder_id: i32,
+    pub coder_id: u32,
     pub action: Action,
     pub line: String,
     pub line_number: usize,

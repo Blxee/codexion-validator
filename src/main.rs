@@ -1,3 +1,4 @@
+mod args;
 mod behaviour;
 mod parsing;
 use std::{
@@ -8,7 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::{behaviour::CodexionState, parsing::CodexionOutput};
+use crate::{args::RawArgs, behaviour::CodexionState, parsing::CodexionOutput};
 
 fn main() {
     let args = args().collect::<Vec<_>>();
@@ -17,15 +18,15 @@ fn main() {
         return eprintln!("Error: wrong argument count");
     };
 
-    let codexion_args = CodexionInput {
-        number_of_coders: 3,
-        time_to_burnout: 3000,
-        time_to_compile: 1000,
-        time_to_debug: 500,
-        time_to_refactor: 500,
-        number_of_compiles_required: 2,
-        dongle_cooldown: 200,
-        scheduler: Scheduler::FIFO,
+    let codexion_args = RawArgs {
+        number_of_coders: "3",
+        time_to_burnout: "3000",
+        time_to_compile: "1000",
+        time_to_debug: "500",
+        time_to_refactor: "500",
+        number_of_compiles_required: "2",
+        dongle_cooldown: "200",
+        scheduler: "fifo",
     };
 
     let program_output = run_command(program_path, codexion_args, Duration::from_secs(1)).unwrap();
@@ -36,7 +37,7 @@ fn main() {
         Err(err) => return println!("{err}"),
     };
 
-    let mut state = CodexionState::from(codexion_args);
+    let mut state = CodexionState::from(codexion_args.try_into().unwrap());
 
     for event in codexion_output.events {
         state.update(event).unwrap();
@@ -45,7 +46,7 @@ fn main() {
 
 fn run_command(
     program: &str,
-    args: CodexionInput,
+    args: RawArgs,
     timeout: Duration,
 ) -> Result<ProgramOutput, Box<dyn Error>> {
     let output = Command::new(program).args(args.to_vec()).output()?;
@@ -64,40 +65,4 @@ struct ProgramOutput {
     stderr: String,
     status: i32,
     duration: Duration,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct CodexionInput {
-    number_of_coders: i32,
-    time_to_burnout: i32,
-    time_to_compile: i32,
-    time_to_debug: i32,
-    time_to_refactor: i32,
-    number_of_compiles_required: i32,
-    dongle_cooldown: i32,
-    scheduler: Scheduler,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum Scheduler {
-    FIFO,
-    EDF,
-}
-
-impl CodexionInput {
-    fn to_vec(&self) -> Vec<String> {
-        vec![
-            self.number_of_coders.to_string(),
-            self.time_to_burnout.to_string(),
-            self.time_to_compile.to_string(),
-            self.time_to_debug.to_string(),
-            self.time_to_refactor.to_string(),
-            self.number_of_compiles_required.to_string(),
-            self.dongle_cooldown.to_string(),
-            match self.scheduler {
-                Scheduler::FIFO => String::from("fifo"),
-                Scheduler::EDF => String::from("edf"),
-            },
-        ]
-    }
 }
