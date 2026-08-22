@@ -37,7 +37,8 @@ fn main() {
         Err(err) => return println!("{err}"),
     };
 
-    let mut state = CodexionState::from(codexion_args.try_into().unwrap());
+    let mut state =
+        CodexionState::from(codexion_args.try_into().unwrap(), Duration::from_millis(10));
 
     for event in codexion_output.events {
         state.update(event).unwrap();

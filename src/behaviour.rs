@@ -11,7 +11,9 @@ pub struct CodexionState {
     coders: Vec<Coder>,
     dongles: Vec<Dongle>,
     last_timestamp: Duration,
+    earliest_burnout_coder_idx: usize,
     burn_out_reached: bool,
+    action_duration_tolerance: Duration,
 }
 
 struct Coder {
@@ -68,8 +70,6 @@ pub enum BehaviourErrorKind {
     },
     InvalidDongleTaking(DongleTakingError),
     InvalidCompilation(CompilationError),
-    InvalidDebugging(DebuggingError),
-    InvalidRefactoring(RefactoringError),
     InvalidBurnout(BurnoutError),
 }
 
@@ -82,17 +82,20 @@ enum DongleTakingError {
 #[derive(Debug)]
 enum CompilationError {
     MissingDongles,
-    // ExessDongles,
 }
 
 #[derive(Debug)]
-enum DebuggingError {}
-
-#[derive(Debug)]
-enum RefactoringError {}
-
-#[derive(Debug)]
-enum BurnoutError {}
+enum BurnoutError {
+    BurnoutNotDetected {
+        coder_id: u32,
+        timestamp: Duration,
+    },
+    ShouldNotBurnout {
+        coder_id: u32,
+        burnout_until: Duration,
+    },
+    BurnoutAlreadyReached,
+}
 
 impl Error for BehaviourError {}
 
@@ -126,7 +129,7 @@ impl Dongle {
 }
 
 impl CodexionState {
-    pub fn from(args: ProcessedArgs) -> Self {
+    pub fn from(args: ProcessedArgs, action_duration_tolerance: Duration) -> Self {
         let mut coders = Vec::with_capacity(args.number_of_coders as usize);
         let mut dongles = Vec::with_capacity(args.number_of_coders as usize);
 
@@ -143,7 +146,9 @@ impl CodexionState {
             coders,
             dongles,
             last_timestamp: Duration::ZERO,
+            earliest_burnout_coder_idx: 0,
             burn_out_reached: false,
+            action_duration_tolerance,
         }
     }
 
@@ -157,6 +162,14 @@ impl CodexionState {
             line_number,
         }: Event,
     ) -> Result<(), BehaviourError> {
+        // check whether a burnout already happened
+        if self.burn_out_reached {
+            return Err(BehaviourError {
+                line,
+                line_number,
+                kind: BehaviourErrorKind::InvalidBurnout(BurnoutError::BurnoutAlreadyReached),
+            });
+        }
         // validate common event attributes
         if timestamp < self.last_timestamp {
             return Err(BehaviourError {
@@ -178,10 +191,26 @@ impl CodexionState {
                 },
             });
         }
+        // check whether a burnout should happen
+        let earliest_burnout_timestamp =
+            self.coders[self.earliest_burnout_coder_idx].last_compile_timestamp;
+        if timestamp.saturating_sub(earliest_burnout_timestamp)
+            > self.args.time_to_burnout + self.action_duration_tolerance
+        {
+            self.burn_out_reached = true;
+            return Err(BehaviourError {
+                line,
+                line_number,
+                kind: BehaviourErrorKind::InvalidBurnout(BurnoutError::BurnoutNotDetected {
+                    coder_id,
+                    timestamp: earliest_burnout_timestamp + self.args.time_to_burnout,
+                }),
+            });
+        }
         // validate behaviour/logic according to action
         if let Err(kind) = match action {
             Action::DongleTaken => self.validate_dongle_taking(coder_id, timestamp),
-            Action::Compile => self.validate_compiling(coder_id, timestamp),
+            Action::Compile => self.validate_compiling(coder_id),
             Action::Debug => self.validate_debugging(coder_id, timestamp),
             Action::Refactor => self.validate_refactoring(coder_id, timestamp),
             Action::BurnOut => self.validate_burning_out(coder_id, timestamp),
@@ -196,6 +225,9 @@ impl CodexionState {
         self.last_timestamp = timestamp;
         self.update_coder(coder_id, action, timestamp);
         self.update_dongles(coder_id, action, timestamp);
+        if matches!(action, Action::BurnOut) {
+            self.burn_out_reached = true;
+        }
 
         Ok(())
     }
@@ -209,7 +241,17 @@ impl CodexionState {
         match action {
             Action::DongleTaken => coder.dongles_in_hand += 1,
             Action::Debug => coder.dongles_in_hand = 0,
-            Action::Compile => coder.last_compile_timestamp = timestamp,
+            Action::Compile => {
+                coder.last_compile_timestamp = timestamp;
+                // refresh the coder closest to burnout
+                self.earliest_burnout_coder_idx = self
+                    .coders
+                    .iter()
+                    .enumerate()
+                    .min_by_key(|(_, coder)| coder.last_compile_timestamp)
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
+            }
             _ => (),
         }
     }
@@ -274,6 +316,19 @@ impl CodexionState {
             // validate that taking a dongle
             // should only come after refactoring or taking a first dongle
             (Some(Action::Refactor | Action::DongleTaken) | None, 0 | 1) => {
+                // if the last action was a refactor
+                if let Some(action @ Action::Refactor) = coder.last_action {
+                    let duration_since_refactoring_start =
+                        timestamp.saturating_sub(coder.last_action_timestamp);
+                    // validate that at least refactoring time has passed
+                    if duration_since_refactoring_start < self.args.time_to_refactor {
+                        return Err(BehaviourErrorKind::InvalidActionDuration {
+                            action,
+                            expected_duration: self.args.time_to_refactor,
+                            found_duration: duration_since_refactoring_start,
+                        });
+                    }
+                }
                 // validate that when the coder tries to take a dongle,
                 // one of the neighboring dongles at least must be available
                 match (
@@ -303,24 +358,12 @@ impl CodexionState {
         }
     }
 
-    fn timestamp_not_eqauls(
-        timestamp_1: Duration,
-        timestamp_2: Duration,
-        tolerance: Duration,
-    ) -> bool {
-        let diff = if timestamp_1 > timestamp_2 {
-            timestamp_1 - timestamp_2
-        } else {
-            timestamp_2 - timestamp_1
-        };
-        diff > tolerance
+    fn is_duration_within_tolerance(&self, timestamp_1: Duration, timestamp_2: Duration) -> bool {
+        let diff = timestamp_1.abs_diff(timestamp_2);
+        diff <= self.action_duration_tolerance
     }
 
-    fn validate_compiling(
-        &self,
-        coder_id: u32,
-        timestamp: Duration,
-    ) -> Result<(), BehaviourErrorKind> {
+    fn validate_compiling(&self, coder_id: u32) -> Result<(), BehaviourErrorKind> {
         let coder = &self.coders[Self::id_to_index(coder_id)];
 
         match (coder.last_action, coder.dongles_in_hand) {
@@ -347,16 +390,14 @@ impl CodexionState {
         let coder = &self.coders[Self::id_to_index(coder_id)];
 
         match coder.last_action {
-            Some(Action::Compile) => {
+            Some(action @ Action::Compile) => {
                 let last_action_duration = timestamp.saturating_sub(coder.last_action_timestamp);
 
-                if Self::timestamp_not_eqauls(
-                    last_action_duration,
-                    self.args.time_to_compile,
-                    Duration::from_millis(10),
-                ) {
+                if !self
+                    .is_duration_within_tolerance(last_action_duration, self.args.time_to_compile)
+                {
                     Err(BehaviourErrorKind::InvalidActionDuration {
-                        action: coder.last_action.unwrap(),
+                        action,
                         expected_duration: self.args.time_to_compile,
                         found_duration: last_action_duration,
                     })
@@ -377,7 +418,29 @@ impl CodexionState {
         coder_id: u32,
         timestamp: Duration,
     ) -> Result<(), BehaviourErrorKind> {
-        Ok(())
+        let coder = &self.coders[Self::id_to_index(coder_id)];
+
+        match coder.last_action {
+            Some(action @ Action::Debug) => {
+                let last_action_duration = timestamp.saturating_sub(coder.last_action_timestamp);
+
+                if !self.is_duration_within_tolerance(last_action_duration, self.args.time_to_debug)
+                {
+                    Err(BehaviourErrorKind::InvalidActionDuration {
+                        action,
+                        expected_duration: self.args.time_to_debug,
+                        found_duration: last_action_duration,
+                    })
+                } else {
+                    Ok(())
+                }
+            }
+
+            _ => Err(BehaviourErrorKind::InvalidActionOrder {
+                last_coder_action: coder.last_action,
+                current_coder_action: Action::Refactor,
+            }),
+        }
     }
 
     fn validate_burning_out(
@@ -385,7 +448,20 @@ impl CodexionState {
         coder_id: u32,
         timestamp: Duration,
     ) -> Result<(), BehaviourErrorKind> {
-        Ok(())
+        let last_compile_timestamp =
+            self.coders[Self::id_to_index(coder_id)].last_compile_timestamp;
+        let minimum_time_to_burnout = last_compile_timestamp + self.args.time_to_burnout;
+
+        if timestamp < minimum_time_to_burnout {
+            Err(BehaviourErrorKind::InvalidBurnout(
+                BurnoutError::ShouldNotBurnout {
+                    coder_id,
+                    burnout_until: minimum_time_to_burnout,
+                },
+            ))
+        } else {
+            Ok(())
+        }
     }
 }
 

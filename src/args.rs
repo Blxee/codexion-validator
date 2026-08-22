@@ -33,7 +33,7 @@ pub enum Scheduler {
 #[derive(Debug)]
 pub enum ArgsError {
     InvalidNumber {
-        argument: String,
+        argument: &'static str,
         source: ParseIntError,
     },
     InvalidScheduler,
@@ -59,43 +59,43 @@ impl<'a> TryInto<ProcessedArgs> for RawArgs<'a> {
         Ok(ProcessedArgs {
             number_of_coders: self.number_of_coders.parse().map_err(|source| {
                 ArgsError::InvalidNumber {
-                    argument: "number_of_coders".to_string(),
+                    argument: "number_of_coders",
                     source,
                 }
             })?,
             time_to_burnout: Duration::from_millis(self.time_to_burnout.parse().map_err(
                 |source| ArgsError::InvalidNumber {
-                    argument: "time_to_burnout".to_string(),
+                    argument: "time_to_burnout",
                     source,
                 },
             )?),
             time_to_compile: Duration::from_millis(self.time_to_compile.parse().map_err(
                 |source| ArgsError::InvalidNumber {
-                    argument: "time_to_compile".to_string(),
+                    argument: "time_to_compile",
                     source,
                 },
             )?),
             time_to_debug: Duration::from_millis(self.time_to_debug.parse().map_err(|source| {
                 ArgsError::InvalidNumber {
-                    argument: "time_to_debug".to_string(),
+                    argument: "time_to_debug",
                     source,
                 }
             })?),
             time_to_refactor: Duration::from_millis(self.time_to_refactor.parse().map_err(
                 |source| ArgsError::InvalidNumber {
-                    argument: "time_to_refactor".to_string(),
+                    argument: "time_to_refactor",
                     source,
                 },
             )?),
             number_of_compiles_required: self.number_of_compiles_required.parse().map_err(
                 |source| ArgsError::InvalidNumber {
-                    argument: "number_of_compiles_required".to_string(),
+                    argument: "number_of_compiles_required",
                     source,
                 },
             )?,
             dongle_cooldown: Duration::from_millis(self.dongle_cooldown.parse().map_err(
                 |source| ArgsError::InvalidNumber {
-                    argument: "dongle_cooldown".to_string(),
+                    argument: "dongle_cooldown",
                     source,
                 },
             )?),
