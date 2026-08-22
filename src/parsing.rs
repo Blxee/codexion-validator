@@ -23,7 +23,7 @@ pub enum Action {
     Compile,
     Debug,
     Refactor,
-    BurnOut,
+    Burnout,
 }
 
 #[derive(Debug)]
@@ -116,7 +116,7 @@ impl TryFrom<&str> for Event {
             "is compiling" => Action::Compile,
             "is debugging" => Action::Debug,
             "is refactoring" => Action::Refactor,
-            "burned out" => Action::BurnOut,
+            "burned out" => Action::Burnout,
             _ => {
                 return Err(OutputParsingError {
                     line: line.to_string(),
@@ -153,6 +153,22 @@ impl Display for OutputParsingError {
             f,
             "[Error at line {}]: '{}'\n{}",
             self.line_number, self.line, kind,
+        )
+    }
+}
+
+impl Display for Action {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Action::DongleTaken => "take dongle",
+                Action::Compile => "compile",
+                Action::Debug => "debug",
+                Action::Refactor => "refactor",
+                Action::Burnout => "burnout",
+            }
         )
     }
 }

@@ -19,9 +19,9 @@ fn main() {
     };
 
     let codexion_args = RawArgs {
-        number_of_coders: "3",
+        number_of_coders: "30",
         time_to_burnout: "3000",
-        time_to_compile: "1000",
+        time_to_compile: "500",
         time_to_debug: "500",
         time_to_refactor: "500",
         number_of_compiles_required: "2",

@@ -213,7 +213,7 @@ impl CodexionState {
             Action::Compile => self.validate_compiling(coder_id),
             Action::Debug => self.validate_debugging(coder_id, timestamp),
             Action::Refactor => self.validate_refactoring(coder_id, timestamp),
-            Action::BurnOut => self.validate_burning_out(coder_id, timestamp),
+            Action::Burnout => self.validate_burning_out(coder_id, timestamp),
         } {
             return Err(BehaviourError {
                 line,
@@ -225,7 +225,7 @@ impl CodexionState {
         self.last_timestamp = timestamp;
         self.update_coder(coder_id, action, timestamp);
         self.update_dongles(coder_id, action, timestamp);
-        if matches!(action, Action::BurnOut) {
+        if matches!(action, Action::Burnout) {
             self.burn_out_reached = true;
         }
 
@@ -467,11 +467,68 @@ impl CodexionState {
 
 impl Display for BehaviourError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let kind = match self.kind {
-            BehaviourErrorKind::UnsynchronizedTimestamps { .. } => {
-                "the timestamps are unsyncronized"
+        use BehaviourErrorKind as Behaviour;
+
+        let kind = match &self.kind {
+            Behaviour::UnsynchronizedTimestamps {
+                last_timestamp,
+                current_timestamp,
+            } => format!(
+                "timestamps are not synchronized (last: {}ms, current: {}ms)",
+                last_timestamp.as_millis(),
+                current_timestamp.as_millis()
+            ),
+            Behaviour::InvalidActionDuration {
+                action,
+                expected_duration,
+                found_duration,
+            } => format!(
+                "inavlid action duration, '{}' should have taken {}ms but took only {}ms",
+                action,
+                expected_duration.as_millis(),
+                found_duration.as_millis()
+            ),
+            Behaviour::InvalidCoderId { max_id, found } => {
+                format!("invalid coder id, max id is {max_id} but found {found}")
             }
-            _ => "",
+            Behaviour::InvalidActionOrder {
+                last_coder_action,
+                current_coder_action,
+            } => format!(
+                "invalid action order, last actiom was '{}' but current is '{}'",
+                if let Some(action) = last_coder_action {
+                    action.to_string()
+                } else {
+                    "none".to_string()
+                },
+                current_coder_action
+            ),
+            Behaviour::InvalidDongleTaking(DongleTakingError::UnavailableDongle) => {
+                format!("coder took a dongle while it's unavailable")
+            }
+            Behaviour::InvalidDongleTaking(DongleTakingError::TooManyDongles) => {
+                format!("coder tried to take more than 2 dongles")
+            }
+            Behaviour::InvalidCompilation(CompilationError::MissingDongles) => {
+                format!("coder tried to compile while having less than 2 dongles")
+            }
+            Behaviour::InvalidBurnout(BurnoutError::BurnoutNotDetected {
+                coder_id,
+                timestamp,
+            }) => format!(
+                "coder_{coder_id} should have burned out at {}ms",
+                timestamp.as_millis()
+            ),
+            Behaviour::InvalidBurnout(BurnoutError::ShouldNotBurnout {
+                coder_id,
+                burnout_until,
+            }) => format!(
+                "coder_{coder_id} should not have burned out until {}ms",
+                burnout_until.as_millis()
+            ),
+            Behaviour::InvalidBurnout(BurnoutError::BurnoutAlreadyReached) => {
+                format!("nothing should print after burnout")
+            }
         };
         write!(
             f,
