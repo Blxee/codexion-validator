@@ -14,6 +14,7 @@ pub struct CodexionState {
     earliest_burnout_coder_idx: usize,
     burn_out_reached: bool,
     action_duration_tolerance: Duration,
+    minimum_compiles: u32,
 }
 
 struct Coder {
@@ -21,6 +22,7 @@ struct Coder {
     last_action: Option<Action>,
     last_action_timestamp: Duration,
     dongles_in_hand: u32,
+    compile_count: u32,
     last_compile_timestamp: Duration,
 }
 
@@ -74,18 +76,19 @@ pub enum BehaviourErrorKind {
 }
 
 #[derive(Debug)]
-enum DongleTakingError {
+pub enum DongleTakingError {
     TooManyDongles,
     UnavailableDongle,
 }
 
 #[derive(Debug)]
-enum CompilationError {
+pub enum CompilationError {
     MissingDongles,
+    ExceedingMaxCompiles,
 }
 
 #[derive(Debug)]
-enum BurnoutError {
+pub enum BurnoutError {
     BurnoutNotDetected {
         coder_id: u32,
         timestamp: Duration,
@@ -107,6 +110,7 @@ impl Coder {
             last_action_timestamp: Duration::ZERO,
             dongles_in_hand: 0,
             last_compile_timestamp: Duration::ZERO,
+            compile_count: 0,
         }
     }
 }
@@ -149,6 +153,7 @@ impl CodexionState {
             earliest_burnout_coder_idx: 0,
             burn_out_reached: false,
             action_duration_tolerance,
+            minimum_compiles: 0,
         }
     }
 
@@ -208,19 +213,21 @@ impl CodexionState {
             });
         }
         // validate behaviour/logic according to action
-        if let Err(kind) = match action {
+        let result = if let Err(kind) = match action {
             Action::DongleTaken => self.validate_dongle_taking(coder_id, timestamp),
             Action::Compile => self.validate_compiling(coder_id),
             Action::Debug => self.validate_debugging(coder_id, timestamp),
             Action::Refactor => self.validate_refactoring(coder_id, timestamp),
             Action::Burnout => self.validate_burning_out(coder_id, timestamp),
         } {
-            return Err(BehaviourError {
+            Err(BehaviourError {
                 line,
                 line_number,
                 kind,
-            });
-        }
+            })
+        } else {
+            Ok(())
+        };
         // update state
         self.last_timestamp = timestamp;
         self.update_coder(coder_id, action, timestamp);
@@ -229,7 +236,7 @@ impl CodexionState {
             self.burn_out_reached = true;
         }
 
-        Ok(())
+        result
     }
 
     fn update_coder(&mut self, coder_id: u32, action: Action, timestamp: Duration) {
@@ -242,6 +249,7 @@ impl CodexionState {
             Action::DongleTaken => coder.dongles_in_hand += 1,
             Action::Debug => coder.dongles_in_hand = 0,
             Action::Compile => {
+                coder.compile_count += 1;
                 coder.last_compile_timestamp = timestamp;
                 // refresh the coder closest to burnout
                 self.earliest_burnout_coder_idx = self
@@ -364,6 +372,20 @@ impl CodexionState {
     }
 
     fn validate_compiling(&self, coder_id: u32) -> Result<(), BehaviourErrorKind> {
+        // check whether a coder is compiling
+        // even after all have reached number of compiles required
+        let coder_with_least_compiles = self
+            .coders
+            .iter()
+            .map(|coder| coder.compile_count)
+            .min()
+            .unwrap();
+        if coder_with_least_compiles >= self.args.number_of_compiles_required {
+            return Err(BehaviourErrorKind::InvalidCompilation(
+                CompilationError::ExceedingMaxCompiles,
+            ));
+        }
+
         let coder = &self.coders[Self::id_to_index(coder_id)];
 
         match (coder.last_action, coder.dongles_in_hand) {
@@ -483,7 +505,7 @@ impl Display for BehaviourError {
                 expected_duration,
                 found_duration,
             } => format!(
-                "inavlid action duration, '{}' should have taken {}ms but took only {}ms",
+                "invalid action duration, '{}' should have taken {}ms but took {}ms",
                 action,
                 expected_duration.as_millis(),
                 found_duration.as_millis()
@@ -495,7 +517,7 @@ impl Display for BehaviourError {
                 last_coder_action,
                 current_coder_action,
             } => format!(
-                "invalid action order, last actiom was '{}' but current is '{}'",
+                "invalid action order, last action was '{}' but current is '{}'",
                 if let Some(action) = last_coder_action {
                     action.to_string()
                 } else {
@@ -511,6 +533,9 @@ impl Display for BehaviourError {
             }
             Behaviour::InvalidCompilation(CompilationError::MissingDongles) => {
                 format!("coder tried to compile while having less than 2 dongles")
+            }
+            Behaviour::InvalidCompilation(CompilationError::ExceedingMaxCompiles) => {
+                format!("coder tried to compile even after everyone reached compiles required")
             }
             Behaviour::InvalidBurnout(BurnoutError::BurnoutNotDetected {
                 coder_id,

@@ -19,13 +19,13 @@ fn main() {
     };
 
     let codexion_args = RawArgs {
-        number_of_coders: "30",
-        time_to_burnout: "3000",
-        time_to_compile: "500",
-        time_to_debug: "500",
-        time_to_refactor: "500",
-        number_of_compiles_required: "2",
-        dongle_cooldown: "200",
+        number_of_coders: "10",
+        time_to_burnout: "200",
+        time_to_compile: "50",
+        time_to_debug: "50",
+        time_to_refactor: "50",
+        number_of_compiles_required: "20",
+        dongle_cooldown: "20",
         scheduler: "fifo",
     };
 
@@ -41,7 +41,10 @@ fn main() {
         CodexionState::from(codexion_args.try_into().unwrap(), Duration::from_millis(10));
 
     for event in codexion_output.events {
-        state.update(event).unwrap();
+        match state.update(event) {
+            Ok(_) => (),
+            Err(err) => println!("{err}"),
+        }
     }
 }
 
