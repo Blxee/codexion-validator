@@ -1,13 +1,5 @@
 use std::{error::Error, fmt::Display, time::Duration};
 
-use crate::ProgramOutput;
-
-#[derive(Debug)]
-pub struct CodexionOutput {
-    pub events: Vec<Event>,
-    duration: Duration,
-}
-
 #[derive(Debug)]
 pub struct Event {
     pub timestamp: Duration,
@@ -43,28 +35,6 @@ pub enum ParsingErrorKind {
 }
 
 impl Error for OutputParsingError {}
-
-impl TryFrom<&ProgramOutput> for CodexionOutput {
-    type Error = OutputParsingError;
-
-    fn try_from(output: &ProgramOutput) -> Result<Self, Self::Error> {
-        let mut events = Vec::new();
-
-        for (number, line) in output.stdout.lines().enumerate() {
-            let mut event: Event = line.try_into().map_err(|mut err: OutputParsingError| {
-                err.line_number = number;
-                err
-            })?;
-            event.line_number = number;
-            events.push(event);
-        }
-
-        Ok(CodexionOutput {
-            events,
-            duration: output.duration,
-        })
-    }
-}
 
 impl TryFrom<&str> for Event {
     type Error = OutputParsingError;
