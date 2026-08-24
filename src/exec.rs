@@ -1,6 +1,7 @@
 use std::{
     io::BufReader,
-    process::{Child, ChildStderr, ChildStdout, Command, Stdio},
+    os::unix::process::ExitStatusExt,
+    process::{Child, ChildStderr, ChildStdout, Command, ExitStatus, Stdio},
     thread::{self, JoinHandle},
     time::Duration,
 };
@@ -10,15 +11,25 @@ use crate::args::RawArgs;
 pub struct CodexionInstance {
     stdout: Option<BufReader<ChildStdout>>,
     stderr: Option<BufReader<ChildStderr>>,
-    exit_code: Option<i32>,
-    child_monitor: Option<JoinHandle<Option<i32>>>,
+    process_result: Option<ProcessResult>,
+    child_monitor: Option<JoinHandle<ProcessResult>>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ProcessResult {
+    Success,
+    ExitFailure(i32),
+    SegmentationFault,
+    Signaled(i32),
+    TimedOut,
 }
 
 impl<'a> CodexionInstance {
+    // create and immediately start a codexion instance
     pub fn new(program: &'a str, args: RawArgs<'a>, timeout: Option<Duration>) -> Self {
         let mut child_process = Command::new(program)
             .args(args.to_vec())
-            .stdout(Stdio::piped())
+            .stdout(Stdio::piped()) // pipe stdout and stderr to capture them
             .stderr(Stdio::piped())
             .spawn()
             .expect("Error running codexion program");
@@ -40,18 +51,29 @@ impl<'a> CodexionInstance {
                     // if the timeout was reached, kill the child
                     if duration.is_zero() {
                         let _ = child_process.kill();
-                        break;
+                        return ProcessResult::TimedOut;
                     }
                 }
             }
             // reap the exit status of the child if any
-            child_process.wait().unwrap().code()
+            let exit_status = child_process.wait().unwrap();
+            match (exit_status.code(), exit_status.signal()) {
+                // if there was a seg fault
+                (_, Some(11)) => ProcessResult::SegmentationFault,
+                // if process terminated with a signal
+                (_, Some(sig)) => ProcessResult::Signaled(sig),
+                // if process exited with success
+                (Some(0), None) => ProcessResult::Success,
+                // if process exited with failure
+                (Some(status), None) => ProcessResult::ExitFailure(status),
+                _ => ProcessResult::Success,
+            }
         }));
 
         Self {
             stdout,
             stderr,
-            exit_code: None,
+            process_result: None,
             child_monitor,
         }
     }
@@ -64,15 +86,13 @@ impl<'a> CodexionInstance {
         self.stderr.take()
     }
 
-    pub fn exit_code(&mut self) -> Option<i32> {
-        // get the status code from the child monitoring thread
-        if self.child_monitor.is_some() {
-            self.exit_code = self
-                .child_monitor
-                .take()
-                .and_then(|handle| handle.join().unwrap())
+    // wait for the child to terminate/timeout and return the exit status if any
+    pub fn exit_code(&mut self) -> ProcessResult {
+        // get the exit status from the child monitoring thread
+        if let Some(child) = self.child_monitor.take() {
+            self.process_result = Some(child.join().unwrap());
         }
-        self.exit_code
+        self.process_result.unwrap()
     }
 }
 
