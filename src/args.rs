@@ -32,6 +32,8 @@ pub enum Scheduler {
 
 #[derive(Debug)]
 pub enum ArgsError {
+    TooManyArguments(usize),
+    TooFewArguments(usize),
     InvalidNumber {
         argument: &'static str,
         source: ParseIntError,
@@ -44,6 +46,12 @@ impl Error for ArgsError {}
 impl Display for ArgsError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            ArgsError::TooManyArguments(n) => {
+                write!(f, "Error: too many arguments, expected 8 but found {n}")
+            }
+            ArgsError::TooFewArguments(n) => {
+                write!(f, "Error: too few arguments, expected 8 but found {n}")
+            }
             ArgsError::InvalidNumber { argument, source } => {
                 write!(f, "Error: invalid number for argument {argument}: {source}")
             }
@@ -120,5 +128,28 @@ impl<'a> RawArgs<'a> {
             self.dongle_cooldown,
             self.scheduler,
         ]
+    }
+}
+
+impl<'a> TryFrom<&'a str> for RawArgs<'a> {
+    type Error = ArgsError;
+
+    fn try_from(value: &'a str) -> Result<Self, Self::Error> {
+        let args: Vec<_> = value.split_whitespace().collect();
+
+        match args.len() {
+            n @ ..=7 => Err(ArgsError::TooFewArguments(n)),
+            n @ 9.. => Err(ArgsError::TooManyArguments(n)),
+            8 => Ok(Self {
+                number_of_coders: args[0],
+                time_to_burnout: args[1],
+                time_to_compile: args[2],
+                time_to_debug: args[3],
+                time_to_refactor: args[4],
+                number_of_compiles_required: args[5],
+                dongle_cooldown: args[6],
+                scheduler: args[7],
+            }),
+        }
     }
 }
