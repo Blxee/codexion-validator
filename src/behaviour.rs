@@ -491,11 +491,12 @@ impl Display for BehaviourError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use BehaviourErrorKind as Behaviour;
 
-        let kind = match &self.kind {
+        match &self.kind {
             Behaviour::UnsynchronizedTimestamps {
                 last_timestamp,
                 current_timestamp,
-            } => format!(
+            } => write!(
+                f,
                 "timestamps are not synchronized (last: {}ms, current: {}ms)",
                 last_timestamp.as_millis(),
                 current_timestamp.as_millis()
@@ -504,19 +505,21 @@ impl Display for BehaviourError {
                 action,
                 expected_duration,
                 found_duration,
-            } => format!(
+            } => write!(
+                f,
                 "invalid action duration, '{}' should have taken {}ms but took {}ms",
                 action,
                 expected_duration.as_millis(),
                 found_duration.as_millis()
             ),
             Behaviour::InvalidCoderId { max_id, found } => {
-                format!("invalid coder id, max id is {max_id} but found {found}")
+                write!(f, "invalid coder id, max id is {max_id} but found {found}")
             }
             Behaviour::InvalidActionOrder {
                 last_coder_action,
                 current_coder_action,
-            } => format!(
+            } => write!(
+                f,
                 "invalid action order, last action was '{}' but current is '{}'",
                 if let Some(action) = last_coder_action {
                     action.to_string()
@@ -526,39 +529,39 @@ impl Display for BehaviourError {
                 current_coder_action
             ),
             Behaviour::InvalidDongleTaking(DongleTakingError::UnavailableDongle) => {
-                format!("coder took a dongle while it's unavailable")
+                write!(f, "coder took a dongle while it's unavailable")
             }
             Behaviour::InvalidDongleTaking(DongleTakingError::TooManyDongles) => {
-                format!("coder tried to take more than 2 dongles")
+                write!(f, "coder tried to take more than 2 dongles")
             }
             Behaviour::InvalidCompilation(CompilationError::MissingDongles) => {
-                format!("coder tried to compile while having less than 2 dongles")
+                write!(f, "coder tried to compile while having less than 2 dongles")
             }
             Behaviour::InvalidCompilation(CompilationError::ExceedingMaxCompiles) => {
-                format!("coder tried to compile even after everyone reached compiles required")
+                write!(
+                    f,
+                    "coder tried to compile even after everyone reached compiles required"
+                )
             }
             Behaviour::InvalidBurnout(BurnoutError::BurnoutNotDetected {
                 coder_id,
                 timestamp,
-            }) => format!(
+            }) => write!(
+                f,
                 "coder_{coder_id} should have burned out at {}ms",
                 timestamp.as_millis()
             ),
             Behaviour::InvalidBurnout(BurnoutError::ShouldNotBurnout {
                 coder_id,
                 burnout_until,
-            }) => format!(
+            }) => write!(
+                f,
                 "coder_{coder_id} should not have burned out until {}ms",
                 burnout_until.as_millis()
             ),
             Behaviour::InvalidBurnout(BurnoutError::BurnoutAlreadyReached) => {
-                format!("nothing should print after burnout")
+                write!(f, "nothing should print after burnout")
             }
-        };
-        write!(
-            f,
-            "[Error at line {}]: '{}'\n{}",
-            self.line_number, self.line, kind,
-        )
+        }
     }
 }

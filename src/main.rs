@@ -2,11 +2,27 @@ mod args;
 mod behaviour;
 mod exec;
 mod parsing;
-use std::{env::args, io::BufRead, time::Duration};
+mod protocol;
+mod test_suit;
+mod tui;
+use std::{env::args, io::BufRead, sync::mpsc, thread, time::Duration};
 
-use crate::{args::RawArgs, behaviour::CodexionState, exec::CodexionInstance, parsing::Event};
+use ratatui::{Frame, text::Line, widgets::Widget};
+
+use crate::{
+    args::RawArgs, behaviour::CodexionState, exec::CodexionInstance, parsing::Event,
+    test_suit::TestSuit, tui::UserInterface,
+};
 
 fn main() {
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let mut test = TestSuit::new(sender);
+        test.start();
+    });
+    let mut ui = UserInterface::new(receiver);
+    ui.render();
+
     let args = args().collect::<Vec<_>>();
 
     let [_, program_path] = args.as_slice() else {
@@ -39,5 +55,5 @@ fn main() {
         }
     }
 
-    println!("exit code: {:?}", instance.exit_code());
+    println!("exit code: {:?}", instance.exit_status());
 }

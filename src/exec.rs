@@ -78,6 +78,23 @@ impl<'a> CodexionInstance {
         }
     }
 
+    pub fn excute(
+        program: &'a str,
+        args: RawArgs<'a>,
+        timeout: Option<Duration>,
+    ) -> (
+        BufReader<ChildStdout>,
+        BufReader<ChildStderr>,
+        ProcessResult,
+    ) {
+        let mut instance = Self::new(program, args, timeout);
+        (
+            instance.stdout().unwrap(),
+            instance.stderr().unwrap(),
+            instance.exit_status(),
+        )
+    }
+
     pub fn stdout(&mut self) -> Option<BufReader<ChildStdout>> {
         self.stdout.take()
     }
@@ -87,7 +104,7 @@ impl<'a> CodexionInstance {
     }
 
     // wait for the child to terminate/timeout and return the exit status if any
-    pub fn exit_code(&mut self) -> ProcessResult {
+    pub fn exit_status(&mut self) -> ProcessResult {
         // get the exit status from the child monitoring thread
         if let Some(child) = self.child_monitor.take() {
             self.process_result = Some(child.join().unwrap());
