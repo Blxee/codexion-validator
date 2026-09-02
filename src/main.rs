@@ -15,19 +15,19 @@ use crate::{
 };
 
 fn main() {
-    let (sender, receiver) = mpsc::channel();
-    thread::spawn(move || {
-        let mut test = TestSuit::new(sender);
-        test.start();
-    });
-    let mut ui = UserInterface::new(receiver);
-    ui.render();
-
     let args = args().collect::<Vec<_>>();
 
     let [_, program_path] = args.as_slice() else {
         return eprintln!("Error: wrong argument count");
     };
+
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let mut test = TestSuit::new(program_path, sender);
+        test.start();
+    });
+    let mut ui = UserInterface::new(receiver);
+    ui.render();
 
     let codexion_args = RawArgs {
         number_of_coders: "10",

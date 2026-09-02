@@ -17,17 +17,23 @@ use crate::{
 pub struct TestSuit<'a> {
     program_path: &'a str,
     sender: Sender<TestMessage>,
-    tests: Vec<TestCase>,
 }
 
 fn expect_normal(
-    (stdout, stderr, exit_status): (
+    (stdout, mut stderr, exit_status): (
         BufReader<ChildStdout>,
         BufReader<ChildStderr>,
         ProcessResult,
     ),
 ) -> bool {
-    true
+    let exit_code_was_success = matches!(exit_status, ProcessResult::Success);
+    let output_printed = stdout.lines().count() > 1;
+    let mut buf = String::new();
+    stderr.read_to_string(&mut buf);
+    let nothing_in_stderr = buf.is_empty();
+
+    exit_code_was_success && output_printed && nothing_in_stderr
+    // add some behaviour shet
 }
 
 fn expect_error(
@@ -58,21 +64,31 @@ fn expect_no_crash(
 
 impl<'a> TestSuit<'a> {
     pub fn new(program_path: &'a str, sender: Sender<TestMessage>) -> Self {
-        let tests = vec![TestCase::new(Self::test_parsing_number_of_coders, "boi")];
         Self {
             program_path,
             sender,
-            tests,
         }
     }
 
     pub fn start(&mut self) {
-        for i in 0..100 {
-            sleep(Duration::from_secs(1));
-        }
+        // test no args
+        // test extra args
+        self.test_parsing_number_of_coders(1);
+        self.test_parsing_time_to_burnout(2);
+        self.test_parsing_time_to_compile(3);
+        self.test_parsing_time_to_debug(4);
+        self.test_parsing_time_to_refactor(5);
+        self.test_parsing_number_of_compiles_required(6);
+        self.test_parsing_dongle_cooldown(7);
+        // self.test_parsing_dongle_scheduler(0);
     }
 
     fn test_parsing_numeric_argument(&self, test_id: usize, args_template: String) -> TestMessage {
+        self.sender.send(TestMessage::TestStarted {
+            test_id,
+            description: "".to_owned(),
+        });
+
         const ERROR_NUMERIC_ARGS: [&'static str; 21] = [
             "-4294967296",
             "-2147483648",
@@ -111,11 +127,11 @@ impl<'a> TestSuit<'a> {
             );
 
             if !expect_error(excution_result) {
-                return TestMessage::TestFailed {
+                self.sender.send(TestMessage::TestFailed {
                     test_id,
                     args,
                     kind: ParsingShouldFail,
-                };
+                });
             }
         }
 
@@ -129,11 +145,11 @@ impl<'a> TestSuit<'a> {
             );
 
             if !expect_normal(excution_result) {
-                return TestMessage::TestFailed {
+                self.sender.send(TestMessage::TestFailed {
                     test_id,
                     args,
                     kind: ParsingShouldPass,
-                };
+                });
             }
         }
 
@@ -147,14 +163,16 @@ impl<'a> TestSuit<'a> {
             );
 
             if !expect_no_crash(excution_result) {
-                return TestMessage::TestFailed {
+                self.sender.send(TestMessage::TestFailed {
                     test_id,
                     args,
                     kind: SegmentationFault,
-                };
+                });
             }
         }
 
+        self.sender.send(TestMessage::TestSucceeded(test_id));
+        // TODO: remove this shet
         TestMessage::TestSucceeded(test_id)
     }
 
@@ -191,15 +209,5 @@ impl<'a> TestSuit<'a> {
     fn test_parsing_dongle_cooldown(&self, test_id: usize) -> TestMessage {
         let args_template = "4 2000 500 300 300 4 {} fifo".to_string();
         self.test_parsing_numeric_argument(test_id, args_template)
-    }
-}
-
-impl TestCase {
-    fn new<T: ToString>(test_fn: fn(&TestSuit, usize) -> TestMessage, description: T) -> Self {
-        let description = description.to_string();
-        Self {
-            test_fn,
-            description,
-        }
     }
 }
