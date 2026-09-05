@@ -1,14 +1,17 @@
-pub enum TestMessage {
+pub struct TestMessage {
+    test_id: usize,
+    result: TestResult,
+}
+
+pub enum TestResult {
     TestStarted {
-        test_id: usize,
         description: String,
     },
     TestFailed {
-        test_id: usize,
         args: String,
-        kind: FailureKind,
+        failure_kind: FailureKind,
     },
-    TestSucceeded(usize),
+    TestSucceeded,
 }
 
 pub enum FailureKind {

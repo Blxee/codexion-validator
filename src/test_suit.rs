@@ -9,8 +9,8 @@ use std::{
 use crate::{
     exec::{CodexionInstance, ProcessResult},
     protocol::{
-        FailureKind::{ParsingShouldFail, ParsingShouldPass, SegmentationFault},
-        TestMessage,
+        FailureKind::{self, ParsingShouldFail, ParsingShouldPass, SegmentationFault},
+        TestMessage, TestResult,
     },
 };
 
@@ -72,11 +72,30 @@ impl<'a> TestSuit<'a> {
 
     pub fn start(&mut self) {
         for i in 0..10 {
-            self.sender.send(TestMessage::TestStarted {
+            self.sender.send(TestMessage {
                 test_id: i,
-                description: "testing parsing number of coders".into(),
+                result: TestResult::TestStarted {
+                    description: "testing parsing number of coders".into(),
+                },
             });
-            sleep(Duration::from_secs(2));
+            sleep(Duration::from_secs(1));
+        }
+        for i in 0..10 {
+            if i % 2 == 0 {
+                self.sender.send(TestMessage {
+                    test_id: i,
+                    result: TestResult::TestSucceeded,
+                });
+            } else {
+                self.sender.send(TestMessage {
+                    test_id: i,
+                    result: TestResult::TestFailed {
+                        args: "38 38 59 fifo".to_owned(),
+                        failure_kind: FailureKind::SegmentationFault,
+                    },
+                });
+            }
+            sleep(Duration::from_secs(1));
         }
         // test no args
         // test extra args
@@ -91,9 +110,11 @@ impl<'a> TestSuit<'a> {
     }
 
     fn test_parsing_numeric_argument(&self, test_id: usize, args_template: String) -> TestMessage {
-        self.sender.send(TestMessage::TestStarted {
+        self.sender.send(TestMessage {
             test_id,
-            description: "".to_owned(),
+            result: TestResult::TestStarted {
+                description: "testing parsing number of coders".into(),
+            },
         });
 
         const ERROR_NUMERIC_ARGS: [&'static str; 23] = [
