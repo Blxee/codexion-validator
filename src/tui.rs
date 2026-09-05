@@ -1,5 +1,6 @@
-use std::sync::mpsc::Receiver;
+use std::{sync::mpsc::Receiver, time::Duration};
 
+use crossterm::event::{self, KeyCode};
 use ratatui::{text::Line, widgets::Widget};
 
 use crate::protocol::TestMessage;
@@ -23,11 +24,20 @@ impl UserInterface {
         ratatui::run(|terminal| {
             loop {
                 terminal.draw(|frame| {
-                    if let TestMessage::Msg(msg) = self.receiver.recv().unwrap() {
-                        let line = Line::from(msg);
+                    if let TestMessage::TestStarted {
+                        test_id,
+                        description,
+                    } = self.receiver.recv().unwrap()
+                    {
+                        let line = Line::from(description);
                         frame.render_widget(line, frame.area());
                     }
                 });
+                if let Ok(event::Event::Key(key)) = event::read() {
+                    if key.code == KeyCode::Char('q') {
+                        break;
+                    }
+                }
             }
         });
     }

@@ -71,15 +71,22 @@ impl<'a> TestSuit<'a> {
     }
 
     pub fn start(&mut self) {
+        for i in 0..10 {
+            self.sender.send(TestMessage::TestStarted {
+                test_id: i,
+                description: "testing parsing number of coders".into(),
+            });
+            sleep(Duration::from_secs(2));
+        }
         // test no args
         // test extra args
-        self.test_parsing_number_of_coders(1);
-        self.test_parsing_time_to_burnout(2);
-        self.test_parsing_time_to_compile(3);
-        self.test_parsing_time_to_debug(4);
-        self.test_parsing_time_to_refactor(5);
-        self.test_parsing_number_of_compiles_required(6);
-        self.test_parsing_dongle_cooldown(7);
+        // self.test_parsing_number_of_coders(1);
+        // self.test_parsing_time_to_burnout(2);
+        // self.test_parsing_time_to_compile(3);
+        // self.test_parsing_time_to_debug(4);
+        // self.test_parsing_time_to_refactor(5);
+        // self.test_parsing_number_of_compiles_required(6);
+        // self.test_parsing_dongle_cooldown(7);
         // self.test_parsing_dongle_scheduler(0);
     }
 
@@ -89,10 +96,11 @@ impl<'a> TestSuit<'a> {
             description: "".to_owned(),
         });
 
-        const ERROR_NUMERIC_ARGS: [&'static str; 21] = [
+        const ERROR_NUMERIC_ARGS: [&'static str; 23] = [
             "-4294967296",
             "-2147483648",
             "2147483648",
+            "21474836472147483647",
             "4294967295",
             "-1",
             "-10",
@@ -111,6 +119,7 @@ impl<'a> TestSuit<'a> {
             "1--1",
             "+",
             "-",
+            "",
         ];
 
         const NORMAL_NUMERIC_ARGS: [&'static str; 3] = ["2147483647", "1", "10"];
