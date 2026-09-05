@@ -157,10 +157,12 @@ impl<'a> TestSuit<'a> {
             );
 
             if !expect_error(excution_result) {
-                self.sender.send(TestMessage::TestFailed {
+                self.sender.send(TestMessage {
                     test_id,
-                    args,
-                    kind: ParsingShouldFail,
+                    result: TestResult::TestFailed {
+                        args,
+                        failure_kind: ParsingShouldFail,
+                    },
                 });
             }
         }
@@ -175,10 +177,12 @@ impl<'a> TestSuit<'a> {
             );
 
             if !expect_normal(excution_result) {
-                self.sender.send(TestMessage::TestFailed {
+                self.sender.send(TestMessage {
                     test_id,
-                    args,
-                    kind: ParsingShouldPass,
+                    result: TestResult::TestFailed {
+                        args,
+                        failure_kind: ParsingShouldPass,
+                    },
                 });
             }
         }
@@ -193,17 +197,25 @@ impl<'a> TestSuit<'a> {
             );
 
             if !expect_no_crash(excution_result) {
-                self.sender.send(TestMessage::TestFailed {
+                self.sender.send(TestMessage {
                     test_id,
-                    args,
-                    kind: SegmentationFault,
+                    result: TestResult::TestFailed {
+                        args,
+                        failure_kind: SegmentationFault,
+                    },
                 });
             }
         }
 
-        self.sender.send(TestMessage::TestSucceeded(test_id));
+        self.sender.send(TestMessage {
+            test_id,
+            result: TestResult::TestSucceeded,
+        });
         // TODO: remove this shet
-        TestMessage::TestSucceeded(test_id)
+        TestMessage {
+            test_id,
+            result: TestResult::TestSucceeded,
+        }
     }
 
     fn test_parsing_number_of_coders(&self, test_id: usize) -> TestMessage {

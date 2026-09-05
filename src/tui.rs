@@ -7,7 +7,7 @@ use ratatui::{
     widgets::{Block, Row, Table, Widget},
 };
 
-use crate::protocol::TestMessage;
+use crate::protocol::{TestMessage, TestResult};
 
 pub struct UserInterface {
     receiver: Receiver<TestMessage>,
@@ -29,23 +29,20 @@ impl UserInterface {
             loop {
                 let _ = terminal.draw(|frame| {
                     if let Ok(test) = self.receiver.try_recv() {
-                        self.tests.insert(test.test_id);
+                        self.tests.insert(test.test_id, test);
                     }
 
                     let mut rows = Vec::new();
 
-                    for test in &self.tests {
-                        rows.push(match test {
-                            TestMessage::TestStarted {
-                                test_id,
-                                description,
-                            } => Row::new([test_id.to_string()]),
-                            TestMessage::TestFailed {
-                                test_id,
-                                args,
-                                kind,
-                            } => Row::new([test_id.to_string()]),
-                            TestMessage::TestSucceeded(test_id) => Row::new([test_id.to_string()]),
+                    for TestMessage { test_id, result } in self.tests.values() {
+                        rows.push(match result {
+                            TestResult::TestStarted { description } => {
+                                Row::new([test_id.to_string()])
+                            }
+                            TestResult::TestFailed { args, failure_kind } => {
+                                Row::new([test_id.to_string()])
+                            }
+                            TestResult::TestSucceeded => Row::new([test_id.to_string()]),
                         });
                     }
 

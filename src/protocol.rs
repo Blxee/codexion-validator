@@ -1,6 +1,6 @@
 pub struct TestMessage {
-    test_id: usize,
-    result: TestResult,
+    pub test_id: usize,
+    pub result: TestResult,
 }
 
 pub enum TestResult {
