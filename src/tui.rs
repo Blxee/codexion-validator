@@ -4,11 +4,18 @@ use std::{
     time::Duration,
 };
 
-use crossterm::event::{self, KeyCode};
+use crossterm::{
+    event::{self, Event, KeyCode, MouseEventKind},
+    terminal,
+};
 use ratatui::{
     macros::constraints,
+    style::Stylize,
     text::Line,
-    widgets::{Block, Row, Table, Widget},
+    widgets::{
+        Block, Cell, Paragraph, Row, Scrollbar, ScrollbarOrientation, ScrollbarState, Table,
+        TableState, Widget,
+    },
 };
 
 use crate::protocol::{TestMessage, TestResult};
@@ -17,6 +24,8 @@ pub struct UserInterface {
     receiver: Receiver<TestMessage>,
     tests: BTreeMap<usize, Test>,
     current_behaviour_test: Option<Vec<()>>,
+    test_scroll: usize,
+    shutdown: bool,
 }
 
 struct Test {
@@ -37,6 +46,8 @@ impl UserInterface {
             receiver,
             tests: BTreeMap::new(),
             current_behaviour_test: None,
+            test_scroll: 0,
+            shutdown: false,
         }
     }
 
@@ -55,26 +66,39 @@ impl UserInterface {
                     } in self.tests.values()
                     {
                         rows.push(Row::new(match state {
-                            TestState::Running => [id.to_string(), "running".to_string()],
-                            TestState::Failed { args, reason } => [
-                                id.to_string(),
-                                format!("failed when {args} due to {reason}"),
+                            TestState::Running => [
+                                Cell::from(id.to_string()),
+                                Cell::from("...".bold().yellow()),
+                                Cell::from("running"),
                             ],
-                            TestState::Succeeded => [id.to_string(), "won the game".to_string()],
+                            TestState::Failed { args, reason } => [
+                                Cell::from(id.to_string()),
+                                Cell::from("[KO]".bold().red()),
+                                Cell::from(format!("failed when {args} due to {reason}")),
+                            ],
+                            TestState::Succeeded => [
+                                Cell::from(id.to_string()),
+                                Cell::from("[OK]".bold().green()),
+                                Cell::from("won the game"),
+                            ],
                         }));
                     }
 
+                    let mut scrollbar_state =
+                        ScrollbarState::new(self.tests.len()).position(self.test_scroll);
+                    let scroll = Scrollbar::new(ScrollbarOrientation::VerticalRight);
+                    let mut table_state = TableState::default();
+                    table_state.select(Some(self.test_scroll));
+
                     let tests_table =
-                        Table::new(rows, constraints![==50%, ==50%]).block(Block::bordered());
-                    frame.render_widget(tests_table, frame.area());
+                        Table::new(rows, constraints![==3, ==4, >=5]).block(Block::bordered());
+                    frame.render_stateful_widget(tests_table, frame.area(), &mut table_state);
+                    frame.render_stateful_widget(scroll, frame.area(), &mut scrollbar_state);
                 });
 
-                if let Ok(true) = event::poll(Duration::from_millis(10)) {
-                    if let Ok(event::Event::Key(key)) = event::read() {
-                        if key.code == KeyCode::Char('q') {
-                            break;
-                        }
-                    }
+                self.handle_input();
+                if self.shutdown {
+                    break;
                 }
             }
         });
@@ -106,6 +130,39 @@ impl UserInterface {
                 TestResult::TestSucceeded => {
                     self.tests.get_mut(&id).unwrap().state = TestState::Succeeded
                 }
+            }
+        }
+    }
+
+    fn handle_input(&mut self) {
+        let (_, height) = terminal::size().unwrap();
+        let height = height as usize - 3;
+
+        if let Ok(true) = event::poll(Duration::from_millis(10)) {
+            match event::read() {
+                Ok(Event::Key(key)) => match key.code {
+                    KeyCode::Char('k') => {
+                        self.test_scroll = self.test_scroll.saturating_sub(1);
+                    }
+                    KeyCode::Char('j') => {
+                        self.test_scroll =
+                            (self.test_scroll.max(height) + 1).min(self.tests.len() - 1);
+                    }
+                    KeyCode::Char('q') => {
+                        self.shutdown = true;
+                    }
+                    _ => (),
+                },
+                Ok(Event::Mouse(mouse)) => match mouse.kind {
+                    MouseEventKind::ScrollUp => {
+                        self.test_scroll = self.test_scroll.saturating_sub(1);
+                    }
+                    MouseEventKind::ScrollDown => {
+                        self.test_scroll = (self.test_scroll + 1).min(self.tests.len());
+                    }
+                    _ => (),
+                },
+                _ => (),
             }
         }
     }

@@ -71,16 +71,16 @@ impl<'a> TestSuit<'a> {
     }
 
     pub fn start(&mut self) {
-        for i in 0..10 {
+        for i in 0..100 {
             self.sender.send(TestMessage {
                 test_id: i,
                 result: TestResult::TestStarted {
                     description: "testing parsing number of coders".into(),
                 },
             });
-            sleep(Duration::from_secs(1));
+            sleep(Duration::from_millis(100));
         }
-        for i in 0..10 {
+        for i in 0..100 {
             if i % 2 == 0 {
                 self.sender.send(TestMessage {
                     test_id: i,
@@ -95,7 +95,7 @@ impl<'a> TestSuit<'a> {
                     },
                 });
             }
-            sleep(Duration::from_secs(1));
+            sleep(Duration::from_millis(100));
         }
         // test no args
         // test extra args
