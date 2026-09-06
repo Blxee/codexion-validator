@@ -1,11 +1,12 @@
 use std::{
     collections::{BTreeMap, HashMap},
+    io::stdout,
     sync::mpsc::Receiver,
     time::Duration,
 };
 
 use crossterm::{
-    event::{self, Event, KeyCode, MouseEventKind},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, MouseEventKind},
     terminal,
 };
 use ratatui::{
@@ -52,8 +53,12 @@ impl UserInterface {
     }
 
     pub fn render(&mut self) {
+        crossterm::execute!(stdout(), EnableMouseCapture).unwrap();
         ratatui::run(|terminal| {
             loop {
+                let (_, height) = terminal::size().unwrap();
+                let height = height as usize - 3;
+
                 let _ = terminal.draw(|frame| {
                     self.fetch_test();
 
@@ -85,13 +90,16 @@ impl UserInterface {
                     }
 
                     let mut scrollbar_state =
-                        ScrollbarState::new(self.tests.len()).position(self.test_scroll);
+                        ScrollbarState::new(self.tests.len().saturating_sub(height))
+                            .position(self.test_scroll.saturating_sub(height));
                     let scroll = Scrollbar::new(ScrollbarOrientation::VerticalRight);
+
                     let mut table_state = TableState::default();
                     table_state.select(Some(self.test_scroll));
+                    let tests_table = Table::new(rows, constraints![==3, ==4, >=5])
+                        .block(Block::bordered())
+                        .highlight_symbol(">>");
 
-                    let tests_table =
-                        Table::new(rows, constraints![==3, ==4, >=5]).block(Block::bordered());
                     frame.render_stateful_widget(tests_table, frame.area(), &mut table_state);
                     frame.render_stateful_widget(scroll, frame.area(), &mut scrollbar_state);
                 });
@@ -102,6 +110,7 @@ impl UserInterface {
                 }
             }
         });
+        crossterm::execute!(stdout(), DisableMouseCapture).unwrap();
     }
 
     fn fetch_test(&mut self) {
@@ -135,18 +144,18 @@ impl UserInterface {
     }
 
     fn handle_input(&mut self) {
-        let (_, height) = terminal::size().unwrap();
-        let height = height as usize - 3;
+        let scroll_up = || self.test_scroll.saturating_sub(1);
+
+        let scroll_down = || (self.test_scroll + 1).min(self.tests.len() - 1);
 
         if let Ok(true) = event::poll(Duration::from_millis(10)) {
             match event::read() {
                 Ok(Event::Key(key)) => match key.code {
-                    KeyCode::Char('k') => {
-                        self.test_scroll = self.test_scroll.saturating_sub(1);
+                    KeyCode::Char('k') | KeyCode::Up => {
+                        self.test_scroll = scroll_up();
                     }
-                    KeyCode::Char('j') => {
-                        self.test_scroll =
-                            (self.test_scroll.max(height) + 1).min(self.tests.len() - 1);
+                    KeyCode::Char('j') | KeyCode::Down => {
+                        self.test_scroll = scroll_down();
                     }
                     KeyCode::Char('q') => {
                         self.shutdown = true;
@@ -155,10 +164,10 @@ impl UserInterface {
                 },
                 Ok(Event::Mouse(mouse)) => match mouse.kind {
                     MouseEventKind::ScrollUp => {
-                        self.test_scroll = self.test_scroll.saturating_sub(1);
+                        self.test_scroll = scroll_up();
                     }
                     MouseEventKind::ScrollDown => {
-                        self.test_scroll = (self.test_scroll + 1).min(self.tests.len());
+                        self.test_scroll = scroll_down();
                     }
                     _ => (),
                 },
