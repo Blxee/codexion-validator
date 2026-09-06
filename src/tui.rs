@@ -10,6 +10,7 @@ use crossterm::{
     terminal,
 };
 use ratatui::{
+    layout::Layout,
     macros::constraints,
     style::Stylize,
     text::Line,
@@ -62,6 +63,12 @@ impl UserInterface {
                 let _ = terminal.draw(|frame| {
                     self.fetch_test();
 
+                    let chunks = Layout::horizontal(constraints![==70%, ==30%]).split(frame.area());
+                    let test_result_layout = chunks[0];
+                    let chunks = Layout::vertical(constraints![==70%, ==30%]).split(chunks[1]);
+                    let stdout_layout = chunks[0];
+                    let stderr_layout = chunks[1];
+
                     let mut rows = Vec::new();
 
                     for Test {
@@ -100,8 +107,10 @@ impl UserInterface {
                         .block(Block::bordered())
                         .highlight_symbol(">>");
 
-                    frame.render_stateful_widget(tests_table, frame.area(), &mut table_state);
-                    frame.render_stateful_widget(scroll, frame.area(), &mut scrollbar_state);
+                    frame.render_stateful_widget(tests_table, test_result_layout, &mut table_state);
+                    frame.render_stateful_widget(scroll, test_result_layout, &mut scrollbar_state);
+                    frame.render_widget(Block::bordered().title_top("stdout"), stdout_layout);
+                    frame.render_widget(Block::bordered().title_top("stderr"), stderr_layout);
                 });
 
                 self.handle_input();

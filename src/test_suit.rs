@@ -44,7 +44,7 @@ fn expect_error(
     ),
 ) -> bool {
     let exit_code_was_failure = matches!(exit_status, ProcessResult::ExitFailure(_));
-    let error_printed = stderr.lines().count() > 1;
+    let error_printed = stderr.lines().count() >= 1;
     let mut buf = String::new();
     stdout.read_to_string(&mut buf);
     let nothing_in_stdout = buf.is_empty();
@@ -71,51 +71,59 @@ impl<'a> TestSuit<'a> {
     }
 
     pub fn start(&mut self) {
-        for i in 0..100 {
-            self.sender.send(TestMessage {
-                test_id: i,
-                result: TestResult::TestStarted {
-                    description: "testing parsing number of coders".into(),
-                },
-            });
-            sleep(Duration::from_millis(100));
-        }
-        for i in 0..100 {
-            if i % 2 == 0 {
-                self.sender.send(TestMessage {
-                    test_id: i,
-                    result: TestResult::TestSucceeded,
-                });
-            } else {
-                self.sender.send(TestMessage {
-                    test_id: i,
-                    result: TestResult::TestFailed {
-                        args: "38 38 59 fifo".to_owned(),
-                        failure_kind: FailureKind::SegmentationFault,
-                    },
-                });
-            }
-            sleep(Duration::from_millis(100));
-        }
+        // for i in 0..100 {
+        //     self.sender
+        //         .send(TestMessage {
+        //             test_id: i,
+        //             result: TestResult::TestStarted {
+        //                 description: "testing parsing number of coders".into(),
+        //             },
+        //         })
+        //         .unwrap();
+        //     sleep(Duration::from_millis(100));
+        // }
+        // for i in 0..100 {
+        //     if i % 2 == 0 {
+        //         self.sender
+        //             .send(TestMessage {
+        //                 test_id: i,
+        //                 result: TestResult::TestSucceeded,
+        //             })
+        //             .unwrap();
+        //     } else {
+        //         self.sender
+        //             .send(TestMessage {
+        //                 test_id: i,
+        //                 result: TestResult::TestFailed {
+        //                     args: "38 38 59 fifo".to_owned(),
+        //                     failure_kind: FailureKind::SegmentationFault,
+        //                 },
+        //             })
+        //             .unwrap();
+        //     }
+        //     sleep(Duration::from_millis(100));
+        // }
         // test no args
         // test extra args
-        // self.test_parsing_number_of_coders(1);
-        // self.test_parsing_time_to_burnout(2);
-        // self.test_parsing_time_to_compile(3);
-        // self.test_parsing_time_to_debug(4);
-        // self.test_parsing_time_to_refactor(5);
-        // self.test_parsing_number_of_compiles_required(6);
-        // self.test_parsing_dongle_cooldown(7);
+        self.test_parsing_number_of_coders(1);
+        self.test_parsing_time_to_burnout(2);
+        self.test_parsing_time_to_compile(3);
+        self.test_parsing_time_to_debug(4);
+        self.test_parsing_time_to_refactor(5);
+        self.test_parsing_number_of_compiles_required(6);
+        self.test_parsing_dongle_cooldown(7);
         // self.test_parsing_dongle_scheduler(0);
     }
 
-    fn test_parsing_numeric_argument(&self, test_id: usize, args_template: String) -> TestMessage {
-        self.sender.send(TestMessage {
-            test_id,
-            result: TestResult::TestStarted {
-                description: "testing parsing number of coders".into(),
-            },
-        });
+    fn test_parsing_numeric_argument(&self, test_id: usize, args_template: String) {
+        self.sender
+            .send(TestMessage {
+                test_id,
+                result: TestResult::TestStarted {
+                    description: "testing parsing number of coders".into(),
+                },
+            })
+            .unwrap();
 
         const ERROR_NUMERIC_ARGS: [&'static str; 23] = [
             "-4294967296",
@@ -140,12 +148,13 @@ impl<'a> TestSuit<'a> {
             "1--1",
             "+",
             "-",
-            "",
+            "\"\"",
         ];
 
-        const NORMAL_NUMERIC_ARGS: [&'static str; 3] = ["2147483647", "1", "10"];
+        const NORMAL_NUMERIC_ARGS: [&'static str; 4] = ["10", "3", "1", "10"];
 
-        const NO_CRASH_NUMERIC_ARGS: [&'static str; 6] = ["0", "+0", "-0", "+10", "001", "000"];
+        const NO_CRASH_NUMERIC_ARGS: [&'static str; 7] =
+            ["2147483647", "0", "+0", "-0", "+10", "001", "000"];
 
         for arg in ERROR_NUMERIC_ARGS {
             let args = args_template.replace("{}", arg);
@@ -157,13 +166,16 @@ impl<'a> TestSuit<'a> {
             );
 
             if !expect_error(excution_result) {
-                self.sender.send(TestMessage {
-                    test_id,
-                    result: TestResult::TestFailed {
-                        args,
-                        failure_kind: ParsingShouldFail,
-                    },
-                });
+                self.sender
+                    .send(TestMessage {
+                        test_id,
+                        result: TestResult::TestFailed {
+                            args,
+                            failure_kind: ParsingShouldFail,
+                        },
+                    })
+                    .unwrap();
+                return;
             }
         }
 
@@ -173,17 +185,20 @@ impl<'a> TestSuit<'a> {
             let excution_result = CodexionInstance::excute(
                 self.program_path,
                 args.as_str().try_into().unwrap(),
-                Some(Duration::from_secs(1)),
+                Some(Duration::from_secs(10)),
             );
 
             if !expect_normal(excution_result) {
-                self.sender.send(TestMessage {
-                    test_id,
-                    result: TestResult::TestFailed {
-                        args,
-                        failure_kind: ParsingShouldPass,
-                    },
-                });
+                self.sender
+                    .send(TestMessage {
+                        test_id,
+                        result: TestResult::TestFailed {
+                            args,
+                            failure_kind: ParsingShouldPass,
+                        },
+                    })
+                    .unwrap();
+                return;
             }
         }
 
@@ -193,63 +208,63 @@ impl<'a> TestSuit<'a> {
             let excution_result = CodexionInstance::excute(
                 self.program_path,
                 args.as_str().try_into().unwrap(),
-                Some(Duration::from_secs(1)),
+                Some(Duration::from_secs(10)),
             );
 
             if !expect_no_crash(excution_result) {
-                self.sender.send(TestMessage {
-                    test_id,
-                    result: TestResult::TestFailed {
-                        args,
-                        failure_kind: SegmentationFault,
-                    },
-                });
+                self.sender
+                    .send(TestMessage {
+                        test_id,
+                        result: TestResult::TestFailed {
+                            args,
+                            failure_kind: SegmentationFault,
+                        },
+                    })
+                    .unwrap();
+                return;
             }
         }
 
-        self.sender.send(TestMessage {
-            test_id,
-            result: TestResult::TestSucceeded,
-        });
-        // TODO: remove this shet
-        TestMessage {
-            test_id,
-            result: TestResult::TestSucceeded,
-        }
+        self.sender
+            .send(TestMessage {
+                test_id,
+                result: TestResult::TestSucceeded,
+            })
+            .unwrap();
     }
 
-    fn test_parsing_number_of_coders(&self, test_id: usize) -> TestMessage {
-        let args_template = "{} 2000 500 300 300 4 200 fifo".to_string();
-        self.test_parsing_numeric_argument(test_id, args_template)
+    fn test_parsing_number_of_coders(&self, test_id: usize) {
+        let args_template = "{} 1000 500 300 300 4 200 fifo".to_string();
+        self.test_parsing_numeric_argument(test_id, args_template);
     }
 
-    fn test_parsing_time_to_burnout(&self, test_id: usize) -> TestMessage {
+    fn test_parsing_time_to_burnout(&self, test_id: usize) {
         let args_template = "4 {} 500 300 300 4 200 fifo".to_string();
         self.test_parsing_numeric_argument(test_id, args_template)
     }
 
-    fn test_parsing_time_to_compile(&self, test_id: usize) -> TestMessage {
-        let args_template = "4 2000 {} 300 300 4 200 fifo".to_string();
+    fn test_parsing_time_to_compile(&self, test_id: usize) {
+        let args_template = "4 1000 {} 300 300 4 200 fifo".to_string();
         self.test_parsing_numeric_argument(test_id, args_template)
     }
 
-    fn test_parsing_time_to_debug(&self, test_id: usize) -> TestMessage {
-        let args_template = "4 2000 500 {} 300 4 200 fifo".to_string();
+    fn test_parsing_time_to_debug(&self, test_id: usize) {
+        let args_template = "4 1000 500 {} 300 4 200 fifo".to_string();
         self.test_parsing_numeric_argument(test_id, args_template)
     }
 
-    fn test_parsing_time_to_refactor(&self, test_id: usize) -> TestMessage {
-        let args_template = "4 2000 500 300 {} 4 200 fifo".to_string();
+    fn test_parsing_time_to_refactor(&self, test_id: usize) {
+        let args_template = "4 1000 500 300 {} 4 200 fifo".to_string();
         self.test_parsing_numeric_argument(test_id, args_template)
     }
 
-    fn test_parsing_number_of_compiles_required(&self, test_id: usize) -> TestMessage {
-        let args_template = "4 2000 500 300 300 {} 200 fifo".to_string();
+    fn test_parsing_number_of_compiles_required(&self, test_id: usize) {
+        let args_template = "4 1000 500 300 300 {} 200 fifo".to_string();
         self.test_parsing_numeric_argument(test_id, args_template)
     }
 
-    fn test_parsing_dongle_cooldown(&self, test_id: usize) -> TestMessage {
-        let args_template = "4 2000 500 300 300 4 {} fifo".to_string();
+    fn test_parsing_dongle_cooldown(&self, test_id: usize) {
+        let args_template = "4 1000 500 300 300 4 {} fifo".to_string();
         self.test_parsing_numeric_argument(test_id, args_template)
     }
 }
