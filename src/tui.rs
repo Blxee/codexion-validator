@@ -105,6 +105,7 @@ impl UserInterface {
                     table_state.select(Some(self.test_scroll));
                     let tests_table = Table::new(rows, constraints![==3, ==4, >=5])
                         .block(Block::bordered())
+                        .header(Row::new(["id", "result", "bruuuuh"]).bold().underlined())
                         .highlight_symbol(">>");
 
                     frame.render_stateful_widget(tests_table, test_result_layout, &mut table_state);
