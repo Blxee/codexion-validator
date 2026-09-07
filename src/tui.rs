@@ -13,14 +13,14 @@ use ratatui::{
     layout::Layout,
     macros::constraints,
     style::Stylize,
-    text::Line,
+    text::{Line, Text, ToText},
     widgets::{
         Block, Cell, Paragraph, Row, Scrollbar, ScrollbarOrientation, ScrollbarState, Table,
         TableState, Widget,
     },
 };
 
-use crate::protocol::{TestMessage, TestResult};
+use crate::protocol::{FileDescriptor, TestMessage, TestResult};
 
 pub struct UserInterface {
     receiver: Receiver<TestMessage>,
@@ -34,6 +34,8 @@ struct Test {
     id: usize,
     description: String,
     state: TestState,
+    stdout: Vec<String>,
+    stderr: Vec<String>,
 }
 
 enum TestState {
@@ -75,6 +77,7 @@ impl UserInterface {
                         id,
                         description,
                         state,
+                        ..
                     } in self.tests.values()
                     {
                         rows.push(Row::new(match state {
@@ -108,9 +111,20 @@ impl UserInterface {
                         .header(Row::new(["id", "result", "bruuuuh"]).bold().underlined())
                         .highlight_symbol(">>");
 
+                    let test = self.tests.values().nth(self.test_scroll);
+
+                    let stdout_text = match test {
+                        Some(test) => Text::from_iter(test.stdout.iter().map(|s| s.as_str())),
+                        None => Text::from("N/a"),
+                    };
+                    let stdout_par = Paragraph::new(stdout_text);
+
                     frame.render_stateful_widget(tests_table, test_result_layout, &mut table_state);
                     frame.render_stateful_widget(scroll, test_result_layout, &mut scrollbar_state);
-                    frame.render_widget(Block::bordered().title_top("stdout"), stdout_layout);
+                    frame.render_widget(
+                        stdout_par.block(Block::bordered().title_top("stdout")),
+                        stdout_layout,
+                    );
                     frame.render_widget(Block::bordered().title_top("stderr"), stderr_layout);
                 });
 
@@ -137,6 +151,8 @@ impl UserInterface {
                             id,
                             description,
                             state: TestState::Running,
+                            stdout: Vec::new(),
+                            stderr: Vec::new(),
                         },
                     );
                 }
@@ -149,6 +165,10 @@ impl UserInterface {
                 TestResult::TestSucceeded => {
                     self.tests.get_mut(&id).unwrap().state = TestState::Succeeded
                 }
+                TestResult::ProgressLine { fd, line } => match fd {
+                    FileDescriptor::Stdout => self.tests.get_mut(&id).unwrap().stdout.push(line),
+                    FileDescriptor::Stderr => self.tests.get_mut(&id).unwrap().stderr.push(line),
+                },
             }
         }
     }
@@ -179,6 +199,7 @@ impl UserInterface {
                     MouseEventKind::ScrollDown => {
                         self.test_scroll = scroll_down();
                     }
+                    MouseEventKind::Up(event::MouseButton::Left) => (),
                     _ => (),
                 },
                 _ => (),

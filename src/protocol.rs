@@ -9,11 +9,20 @@ pub enum TestResult {
     TestStarted {
         description: String,
     },
+    ProgressLine {
+        fd: FileDescriptor,
+        line: String,
+    },
     TestFailed {
         args: String,
         failure_kind: FailureKind,
     },
     TestSucceeded,
+}
+
+pub enum FileDescriptor {
+    Stdout,
+    Stderr,
 }
 
 pub enum FailureKind {
