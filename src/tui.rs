@@ -80,23 +80,47 @@ impl UserInterface {
                         ..
                     } in self.tests.values()
                     {
-                        rows.push(Row::new(match state {
-                            TestState::Running => [
-                                Cell::from(id.to_string()),
-                                Cell::from("...".bold().yellow()),
-                                Cell::from("running"),
-                            ],
-                            TestState::Failed { args, reason } => [
-                                Cell::from(id.to_string()),
-                                Cell::from("[KO]".bold().red()),
-                                Cell::from(format!("failed when {args} due to {reason}")),
-                            ],
-                            TestState::Succeeded => [
-                                Cell::from(id.to_string()),
-                                Cell::from("[OK]".bold().green()),
-                                Cell::from("won the game"),
-                            ],
-                        }));
+                        rows.push(
+                            Row::new(match state {
+                                TestState::Running => [
+                                    Cell::from(id.to_string()),
+                                    Cell::from("[..]".bold().yellow()),
+                                    Cell::from(Text::from(vec![Line::from(vec![
+                                        "description".bold().underlined(),
+                                        ": ".into(),
+                                        description.into(),
+                                    ])])),
+                                ],
+                                TestState::Failed { args, reason } => [
+                                    Cell::from(id.to_string()),
+                                    Cell::from("[KO]".bold().red()),
+                                    Cell::from(Text::from(vec![
+                                        Line::from(vec![
+                                            "description".bold().underlined(),
+                                            ": ".into(),
+                                            description.into(),
+                                        ]),
+                                        Line::from(vec![
+                                            "arguments".bold().underlined(),
+                                            ": ".into(),
+                                            args.into(),
+                                        ]),
+                                        Line::from(vec![
+                                            "failure_reason".bold().underlined(),
+                                            ": ".into(),
+                                            reason.into(),
+                                        ]),
+                                    ])),
+                                ],
+                                TestState::Succeeded => [
+                                    Cell::from(id.to_string()),
+                                    Cell::from("[OK]".bold().green()),
+                                    Cell::from("won the game"),
+                                ],
+                            })
+                            .height(3)
+                            .bottom_margin(1),
+                        );
                     }
 
                     let mut scrollbar_state =
@@ -106,7 +130,7 @@ impl UserInterface {
 
                     let mut table_state = TableState::default();
                     table_state.select(Some(self.test_scroll));
-                    let tests_table = Table::new(rows, constraints![==3, ==4, >=5])
+                    let tests_table = Table::new(rows, constraints![==3, ==8, >=5])
                         .block(Block::bordered())
                         .header(Row::new(["id", "result", "bruuuuh"]).bold().underlined())
                         .highlight_symbol(">>");
@@ -119,13 +143,22 @@ impl UserInterface {
                     };
                     let stdout_par = Paragraph::new(stdout_text);
 
+                    let stderr_text = match test {
+                        Some(test) => Text::from_iter(test.stderr.iter().map(|s| s.as_str())),
+                        None => Text::from("N/a"),
+                    };
+                    let stderr_par = Paragraph::new(stderr_text);
+
                     frame.render_stateful_widget(tests_table, test_result_layout, &mut table_state);
                     frame.render_stateful_widget(scroll, test_result_layout, &mut scrollbar_state);
                     frame.render_widget(
                         stdout_par.block(Block::bordered().title_top("stdout")),
                         stdout_layout,
                     );
-                    frame.render_widget(Block::bordered().title_top("stderr"), stderr_layout);
+                    frame.render_widget(
+                        stderr_par.block(Block::bordered().title_top("stderr")),
+                        stderr_layout,
+                    );
                 });
 
                 self.handle_input();
@@ -143,6 +176,7 @@ impl UserInterface {
             result,
         }) = self.receiver.try_recv()
         {
+            let test = self.tests.get_mut(&id);
             match result {
                 TestResult::TestStarted { description } => {
                     self.tests.insert(
@@ -157,17 +191,15 @@ impl UserInterface {
                     );
                 }
                 TestResult::TestFailed { args, failure_kind } => {
-                    self.tests.get_mut(&id).unwrap().state = TestState::Failed {
+                    test.unwrap().state = TestState::Failed {
                         args,
                         reason: failure_kind.to_string(),
                     }
                 }
-                TestResult::TestSucceeded => {
-                    self.tests.get_mut(&id).unwrap().state = TestState::Succeeded
-                }
+                TestResult::TestSucceeded => test.unwrap().state = TestState::Succeeded,
                 TestResult::ProgressLine { fd, line } => match fd {
-                    FileDescriptor::Stdout => self.tests.get_mut(&id).unwrap().stdout.push(line),
-                    FileDescriptor::Stderr => self.tests.get_mut(&id).unwrap().stderr.push(line),
+                    FileDescriptor::Stdout => test.unwrap().stdout.push(line),
+                    FileDescriptor::Stderr => test.unwrap().stderr.push(line),
                 },
             }
         }

@@ -7,10 +7,11 @@ use std::{
 };
 
 use crate::{
+    args::RawArgs,
     exec::{CodexionInstance, ProcessResult},
     protocol::{
         FailureKind::{self, ParsingShouldFail, ParsingShouldPass, SegmentationFault},
-        TestMessage, TestResult,
+        FileDescriptor, TestMessage, TestResult,
     },
 };
 
@@ -19,46 +20,25 @@ pub struct TestSuit<'a> {
     sender: Sender<TestMessage>,
 }
 
-fn expect_normal(
-    (stdout, mut stderr, exit_status): (
-        BufReader<ChildStdout>,
-        BufReader<ChildStderr>,
-        ProcessResult,
-    ),
-) -> bool {
+fn expect_normal((stdout, stderr, exit_status): (String, String, ProcessResult)) -> bool {
     let exit_code_was_success = matches!(exit_status, ProcessResult::Success);
     let output_printed = stdout.lines().count() > 1;
-    let mut buf = String::new();
-    stderr.read_to_string(&mut buf);
-    let nothing_in_stderr = buf.is_empty();
+    let nothing_in_stderr = stderr.is_empty();
 
-    exit_code_was_success && output_printed && nothing_in_stderr
+    let bruh = exit_code_was_success && output_printed && nothing_in_stderr;
+    bruh
     // add some behaviour shet
 }
 
-fn expect_error(
-    (mut stdout, stderr, exit_status): (
-        BufReader<ChildStdout>,
-        BufReader<ChildStderr>,
-        ProcessResult,
-    ),
-) -> bool {
+fn expect_error((stdout, stderr, exit_status): (String, String, ProcessResult)) -> bool {
     let exit_code_was_failure = matches!(exit_status, ProcessResult::ExitFailure(_));
     let error_printed = stderr.lines().count() >= 1;
-    let mut buf = String::new();
-    stdout.read_to_string(&mut buf);
-    let nothing_in_stdout = buf.is_empty();
+    let nothing_in_stdout = stdout.is_empty();
 
     exit_code_was_failure && error_printed && nothing_in_stdout
 }
 
-fn expect_no_crash(
-    (_stdout, _stderr, exit_status): (
-        BufReader<ChildStdout>,
-        BufReader<ChildStderr>,
-        ProcessResult,
-    ),
-) -> bool {
+fn expect_no_crash((_stdout, _stderr, exit_status): (String, String, ProcessResult)) -> bool {
     !matches!(exit_status, ProcessResult::SegmentationFault)
 }
 
@@ -159,8 +139,8 @@ impl<'a> TestSuit<'a> {
         for arg in ERROR_NUMERIC_ARGS {
             let args = args_template.replace("{}", arg);
 
-            let excution_result = CodexionInstance::excute(
-                self.program_path,
+            let excution_result = self.excute(
+                test_id,
                 args.as_str().try_into().unwrap(),
                 Some(Duration::from_secs(1)),
             );
@@ -182,8 +162,8 @@ impl<'a> TestSuit<'a> {
         for arg in NORMAL_NUMERIC_ARGS {
             let args = args_template.replace("{}", arg);
 
-            let excution_result = CodexionInstance::excute(
-                self.program_path,
+            let excution_result = self.excute(
+                test_id,
                 args.as_str().try_into().unwrap(),
                 Some(Duration::from_secs(10)),
             );
@@ -205,8 +185,8 @@ impl<'a> TestSuit<'a> {
         for arg in NO_CRASH_NUMERIC_ARGS {
             let args = args_template.replace("{}", arg);
 
-            let excution_result = CodexionInstance::excute(
-                self.program_path,
+            let excution_result = self.excute(
+                test_id,
                 args.as_str().try_into().unwrap(),
                 Some(Duration::from_secs(10)),
             );
@@ -231,6 +211,47 @@ impl<'a> TestSuit<'a> {
                 result: TestResult::TestSucceeded,
             })
             .unwrap();
+    }
+
+    fn excute(
+        &self,
+        test_id: usize,
+        args: RawArgs<'a>,
+        timeout: Option<Duration>,
+    ) -> (String, String, ProcessResult) {
+        let mut instance = CodexionInstance::new(self.program_path, args, timeout);
+
+        let mut stderr = String::new();
+        for line in instance.stderr().unwrap().lines() {
+            let line = line.unwrap();
+            stderr.push_str(&line);
+            self.sender
+                .send(TestMessage {
+                    test_id,
+                    result: TestResult::ProgressLine {
+                        fd: FileDescriptor::Stderr,
+                        line,
+                    },
+                })
+                .unwrap();
+        }
+
+        let mut stdout = String::new();
+        for line in instance.stdout().unwrap().lines() {
+            let line = line.unwrap();
+            stdout.push_str(&line);
+            self.sender
+                .send(TestMessage {
+                    test_id,
+                    result: TestResult::ProgressLine {
+                        fd: FileDescriptor::Stdout,
+                        line,
+                    },
+                })
+                .unwrap();
+        }
+
+        (stdout, stderr, instance.exit_status())
     }
 
     fn test_parsing_number_of_coders(&self, test_id: usize) {
