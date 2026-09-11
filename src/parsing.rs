@@ -1,3 +1,4 @@
+use regex::regex;
 use std::{error::Error, fmt::Display, time::Duration};
 
 #[derive(Debug)]
@@ -28,7 +29,6 @@ pub struct OutputParsingError {
 #[derive(Debug)]
 pub enum ParsingErrorKind {
     InvalidFormat { fields: usize },
-    MissingColon,
     InvalidTimestamp,
     InvalidCoderID,
     InvalidAction,
@@ -40,7 +40,7 @@ impl TryFrom<&str> for Event {
     type Error = OutputParsingError;
 
     fn try_from(line: &str) -> Result<Self, Self::Error> {
-        let spans = line.splitn(3, ' ').collect::<Vec<&str>>();
+        let spans = regex!(r"\s+").splitn(line.trim(), 3).collect::<Vec<&str>>();
         let [timestamp, coder_id, action] = spans.as_slice() else {
             return Err(OutputParsingError {
                 line: line.to_string(),
@@ -51,21 +51,12 @@ impl TryFrom<&str> for Event {
             });
         };
 
-        let timestamp = Duration::from_millis(
-            timestamp
-                .strip_suffix(':')
-                .ok_or(OutputParsingError {
-                    line: line.to_string(),
-                    line_number: 0,
-                    kind: ParsingErrorKind::MissingColon,
-                })?
-                .parse()
-                .map_err(|_| OutputParsingError {
-                    line: line.to_string(),
-                    line_number: 0,
-                    kind: ParsingErrorKind::InvalidTimestamp,
-                })?,
-        );
+        let timestamp =
+            Duration::from_millis(timestamp.trim().parse().map_err(|_| OutputParsingError {
+                line: line.to_string(),
+                line_number: 0,
+                kind: ParsingErrorKind::InvalidTimestamp,
+            })?);
 
         let coder_id = coder_id.parse().map_err(|_| OutputParsingError {
             line: line.to_string(),
@@ -111,7 +102,6 @@ impl Display for OutputParsingError {
         let kind = match self.kind {
                 ParsingErrorKind::InvalidFormat { fields } =>
                     format!("expected 3 parts (timestamp: coder_id action) but found {fields}"),
-                ParsingErrorKind::MissingColon => "missing colon ':' after timestamp".to_string(),
                 ParsingErrorKind::InvalidTimestamp =>
                     "could not parse timestamp into a valid unsigned long".to_string(),
                 ParsingErrorKind::InvalidCoderID =>
@@ -119,11 +109,7 @@ impl Display for OutputParsingError {
                 ParsingErrorKind::InvalidAction =>
                     "invalid action format, expected either 'has taken a dongle', 'is compiling', 'is debugging', 'is refactoring' or 'burned out'".to_string(),
             };
-        write!(
-            f,
-            "[Error at line {}]: '{}'\n{}",
-            self.line_number, self.line, kind,
-        )
+        write!(f, "[Error]: \"{}\"\n{}", self.line, kind,)
     }
 }
 

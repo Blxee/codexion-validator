@@ -21,6 +21,7 @@ pub enum FailureKind {
     SegmentationFault,
     ParsingShouldPass,
     ParsingShouldFail,
+    IncorrectBehaviour,
 }
 
 impl Display for FailureKind {
@@ -32,6 +33,7 @@ impl Display for FailureKind {
                 FailureKind::SegmentationFault => "Segmentation fault",
                 FailureKind::ParsingShouldPass => "Parsing should have passed",
                 FailureKind::ParsingShouldFail => "Parsing should have failed",
+                FailureKind::IncorrectBehaviour => "Incorrect behaviour detected",
             }
         )
     }

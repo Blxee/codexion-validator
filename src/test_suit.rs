@@ -8,6 +8,7 @@ use std::{
 
 use crate::{
     args::RawArgs,
+    behaviour::CodexionState,
     exec::{CodexionInstance, ProcessResult},
     protocol::{
         FailureKind::{self, ParsingShouldFail, ParsingShouldPass, SegmentationFault},
@@ -27,7 +28,6 @@ fn expect_normal((stdout, stderr, exit_status): (String, String, ProcessResult))
     let nothing_in_stderr = stderr.is_empty();
 
     exit_code_was_success && output_printed && nothing_in_stderr
-    // add some behaviour shet
 }
 
 fn expect_error((stdout, stderr, exit_status): (String, String, ProcessResult)) -> bool {
@@ -52,51 +52,21 @@ impl<'a> TestSuit<'a> {
     }
 
     pub fn start(&mut self) {
-        // for i in 0..100 {
-        //     self.sender
-        //         .send(TestMessage {
-        //             test_id: i,
-        //             result: TestResult::TestStarted {
-        //                 description: "testing parsing number of coders".into(),
-        //             },
-        //         })
-        //         .unwrap();
-        //     sleep(Duration::from_millis(100));
-        // }
-        // for i in 0..100 {
-        //     if i % 2 == 0 {
-        //         self.sender
-        //             .send(TestMessage {
-        //                 test_id: i,
-        //                 result: TestResult::TestSucceeded,
-        //             })
-        //             .unwrap();
-        //     } else {
-        //         self.sender
-        //             .send(TestMessage {
-        //                 test_id: i,
-        //                 result: TestResult::TestFailed {
-        //                     args: "38 38 59 fifo".to_owned(),
-        //                     failure_kind: FailureKind::SegmentationFault,
-        //                 },
-        //             })
-        //             .unwrap();
-        //     }
-        //     sleep(Duration::from_millis(100));
-        // }
         // test no args
         // test extra args
-        self.test_parsing_number_of_coders();
-        self.test_parsing_time_to_burnout();
-        self.test_parsing_time_to_compile();
-        self.test_parsing_time_to_debug();
-        self.test_parsing_time_to_refactor();
-        self.test_parsing_number_of_compiles_required();
-        self.test_parsing_dongle_cooldown();
-        // self.test_parsing_dongle_scheduler(0);
+        // self.test_parsing_number_of_coders();
+        // self.test_parsing_time_to_burnout();
+        // self.test_parsing_time_to_compile();
+        // self.test_parsing_time_to_debug();
+        // self.test_parsing_time_to_refactor();
+        // self.test_parsing_number_of_compiles_required();
+        // self.test_parsing_dongle_cooldown();
+        self.test_enough_time_for_even_coders();
+        self.test_enough_time_for_odd_coders();
+        self.test_one_coder();
     }
 
-    fn test_parsing_numeric_argument(&mut self, args_template: String) {
+    fn test_parsing_numeric_argument(&mut self, description: &str, args_template: String) {
         const ERROR_NUMERIC_ARGS: [&'static str; 23] = [
             "-4294967296",
             "-2147483648",
@@ -133,10 +103,12 @@ impl<'a> TestSuit<'a> {
 
             self.current_test_id += 1;
 
-            let excution_result = self.excute(
+            let excution_result = self.execute(
                 self.current_test_id,
+                format!("{description} (wrong arguments)"),
                 args.as_str().try_into().unwrap(),
                 Some(Duration::from_secs(1)),
+                false,
             );
 
             if !expect_error(excution_result) {
@@ -163,10 +135,12 @@ impl<'a> TestSuit<'a> {
             let args = args_template.replace("{}", arg);
             self.current_test_id += 1;
 
-            let excution_result = self.excute(
+            let excution_result = self.execute(
                 self.current_test_id,
+                format!("{description} (normal arguments)"),
                 args.as_str().try_into().unwrap(),
                 Some(Duration::from_secs(10)),
+                false,
             );
 
             if !expect_normal(excution_result) {
@@ -193,10 +167,12 @@ impl<'a> TestSuit<'a> {
             let args = args_template.replace("{}", arg);
             self.current_test_id += 1;
 
-            let excution_result = self.excute(
+            let excution_result = self.execute(
                 self.current_test_id,
+                format!("{description} (no crash arguments)"),
                 args.as_str().try_into().unwrap(),
                 Some(Duration::from_secs(10)),
+                false,
             );
 
             if !expect_no_crash(excution_result) {
@@ -220,23 +196,75 @@ impl<'a> TestSuit<'a> {
         }
     }
 
-    fn excute(
+    fn execute(
         &self,
         test_id: usize,
+        description: String,
         args: RawArgs<'a>,
         timeout: Option<Duration>,
+        test_behaviour: bool,
     ) -> (String, String, ProcessResult) {
         self.sender
             .send(TestMessage {
                 test_id,
                 result: TestResult::TestStarted {
-                    description: "testing parsing number of coders".into(),
+                    description,
                     args: args.into(),
                 },
             })
             .unwrap();
 
         let mut instance = CodexionInstance::new(self.program_path, args, timeout);
+        let mut state = match (test_behaviour, args.try_into()) {
+            (true, Ok(args)) => Some(CodexionState::from(args, Duration::from_millis(10))),
+            _ => None,
+        };
+
+        let mut stdout = String::new();
+        for line in instance.stdout().unwrap().lines() {
+            let line = line.unwrap();
+            stdout.push_str(&line);
+            stdout.push('\n');
+            self.sender
+                .send(TestMessage {
+                    test_id,
+                    result: TestResult::ProgressLine {
+                        fd: FileDescriptor::Stdout,
+                        line: line.to_string(),
+                    },
+                })
+                .unwrap();
+
+            if let Some(state) = &mut state {
+                match line.as_str().try_into() {
+                    Ok(event) => {
+                        if let Err(err) = state.update(event) {
+                            err.to_string();
+                            self.sender
+                                .send(TestMessage {
+                                    test_id,
+                                    result: TestResult::ProgressLine {
+                                        fd: FileDescriptor::Stdout,
+                                        line: err.to_string(),
+                                    },
+                                })
+                                .unwrap();
+                        }
+                    }
+                    Err(err) => {
+                        self.sender
+                            .send(TestMessage {
+                                test_id,
+                                result: TestResult::ProgressLine {
+                                    fd: FileDescriptor::Stdout,
+                                    line: format!("Format error: {}", err.to_string()),
+                                },
+                            })
+                            .unwrap();
+                    }
+                }
+            }
+        }
 
         let mut stderr = String::new();
         for line in instance.stderr().unwrap().lines() {
@@ -254,57 +282,89 @@ impl<'a> TestSuit<'a> {
                 .unwrap();
         }
 
-        let mut stdout = String::new();
-        for line in instance.stdout().unwrap().lines() {
-            let line = line.unwrap();
-            stdout.push_str(&line);
-            stdout.push('\n');
-            self.sender
-                .send(TestMessage {
-                    test_id,
-                    result: TestResult::ProgressLine {
-                        fd: FileDescriptor::Stdout,
-                        line,
-                    },
-                })
-                .unwrap();
-        }
-
         (stdout, stderr, instance.exit_status())
     }
 
     fn test_parsing_number_of_coders(&mut self) {
         let args_template = "{} 1000 500 300 300 4 200 fifo".to_string();
-        self.test_parsing_numeric_argument(args_template);
+        self.test_parsing_numeric_argument("test parsing number of coders", args_template);
     }
 
     fn test_parsing_time_to_burnout(&mut self) {
         let args_template = "4 {} 500 300 300 4 200 fifo".to_string();
-        self.test_parsing_numeric_argument(args_template)
+        self.test_parsing_numeric_argument("test parsing time to burnout", args_template)
     }
 
     fn test_parsing_time_to_compile(&mut self) {
         let args_template = "4 1000 {} 300 300 4 200 fifo".to_string();
-        self.test_parsing_numeric_argument(args_template)
+        self.test_parsing_numeric_argument("test parsing time to compile", args_template)
     }
 
     fn test_parsing_time_to_debug(&mut self) {
         let args_template = "4 1000 500 {} 300 4 200 fifo".to_string();
-        self.test_parsing_numeric_argument(args_template)
+        self.test_parsing_numeric_argument("test parsing time to debug", args_template)
     }
 
     fn test_parsing_time_to_refactor(&mut self) {
         let args_template = "4 1000 500 300 {} 4 200 fifo".to_string();
-        self.test_parsing_numeric_argument(args_template)
+        self.test_parsing_numeric_argument("test parsing time to refactor", args_template)
     }
 
     fn test_parsing_number_of_compiles_required(&mut self) {
         let args_template = "4 1000 500 300 300 {} 200 fifo".to_string();
-        self.test_parsing_numeric_argument(args_template)
+        self.test_parsing_numeric_argument(
+            "test parsing number of compiles required",
+            args_template,
+        )
     }
 
     fn test_parsing_dongle_cooldown(&mut self) {
         let args_template = "4 1000 500 300 300 4 {} fifo".to_string();
-        self.test_parsing_numeric_argument(args_template)
+        self.test_parsing_numeric_argument("test parsing dongle cooldown", args_template)
+    }
+
+    fn test_behaviour(&mut self, args: RawArgs, description: String) {
+        self.current_test_id += 1;
+        let excution_result = self.execute(self.current_test_id, description, args, None, true);
+
+        if !expect_normal(excution_result) {
+            self.sender
+                .send(TestMessage {
+                    test_id: self.current_test_id,
+                    result: TestResult::TestFailed {
+                        failure_kind: FailureKind::IncorrectBehaviour,
+                    },
+                })
+                .unwrap();
+            return;
+        } else {
+            self.sender
+                .send(TestMessage {
+                    test_id: self.current_test_id,
+                    result: TestResult::TestSucceeded,
+                })
+                .unwrap();
+        }
+    }
+
+    fn test_enough_time_for_even_coders(&mut self) {
+        self.test_behaviour(
+            "4 4000 500 300 300 4 100 fifo".try_into().unwrap(),
+            "test enough time for even coders".to_string(),
+        );
+    }
+
+    fn test_enough_time_for_odd_coders(&mut self) {
+        self.test_behaviour(
+            "5 4000 500 300 300 4 100 fifo".try_into().unwrap(),
+            "test enough time for odd coders".to_string(),
+        );
+    }
+
+    fn test_one_coder(&mut self) {
+        self.test_behaviour(
+            "1 1000 500 300 300 4 100 fifo".try_into().unwrap(),
+            "test one coder".to_string(),
+        );
     }
 }

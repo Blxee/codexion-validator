@@ -115,7 +115,11 @@ impl Coder {
     }
 }
 
-impl Dongle {
+trait Availab {
+    fn availability(&self, timestamp: Duration) -> Availability;
+}
+
+impl Availab for Dongle {
     fn availability(&self, timestamp: Duration) -> Availability {
         match self.state {
             DongleState::Available => Availability::Available,
@@ -132,10 +136,19 @@ impl Dongle {
     }
 }
 
+impl Availab for Option<&mut Dongle> {
+    fn availability(&self, timestamp: Duration) -> Availability {
+        match self {
+            Some(dongle) => dongle.availability(timestamp),
+            None => Availability::Unavailable,
+        }
+    }
+}
+
 impl CodexionState {
     pub fn from(args: ProcessedArgs, action_duration_tolerance: Duration) -> Self {
-        let mut coders = Vec::with_capacity(args.number_of_coders as usize);
-        let mut dongles = Vec::with_capacity(args.number_of_coders as usize);
+        let mut coders = Vec::new();
+        let mut dongles = Vec::new();
 
         for id in 1..=args.number_of_coders {
             coders.push(Coder::from_id(id));
@@ -273,21 +286,25 @@ impl CodexionState {
         match action {
             Action::DongleTaken => {
                 if coder.dongles_in_hand == 1 {
-                    left_dongle.state = DongleState::Unknown;
-                    right_dongle.state = DongleState::Unknown;
+                    left_dongle.map(|dongle| dongle.state = DongleState::Unknown);
+                    right_dongle.map(|dongle| dongle.state = DongleState::Unknown);
                 } else if coder.dongles_in_hand == 2 {
-                    left_dongle.state = DongleState::Held;
-                    right_dongle.state = DongleState::Held;
+                    left_dongle.map(|dongle| dongle.state = DongleState::Held);
+                    right_dongle.map(|dongle| dongle.state = DongleState::Held);
                 }
             }
             Action::Compile => {
-                left_dongle.state = DongleState::Held;
-                right_dongle.state = DongleState::Held;
+                left_dongle.map(|dongle| dongle.state = DongleState::Held);
+                right_dongle.map(|dongle| dongle.state = DongleState::Held);
             }
             Action::Debug => {
                 let time_to_cooldown = self.args.dongle_cooldown;
-                left_dongle.state = DongleState::CoolingDownUntil(timestamp + time_to_cooldown);
-                right_dongle.state = DongleState::CoolingDownUntil(timestamp + time_to_cooldown);
+                left_dongle.map(|dongle| {
+                    dongle.state = DongleState::CoolingDownUntil(timestamp + time_to_cooldown)
+                });
+                right_dongle.map(|dongle| {
+                    dongle.state = DongleState::CoolingDownUntil(timestamp + time_to_cooldown)
+                });
             }
             _ => (),
         }
@@ -296,14 +313,16 @@ impl CodexionState {
     fn get_coder_nearby_dongles(
         coder_id: u32,
         dongles: &mut Vec<Dongle>,
-    ) -> (&mut Dongle, &mut Dongle) {
+    ) -> (Option<&mut Dongle>, Option<&mut Dongle>) {
         let index = Self::id_to_index(coder_id);
-        if index < dongles.len() - 1 {
+        if dongles.len() == 1 {
+            (Some(&mut dongles[index]), None)
+        } else if index < dongles.len() - 1 {
             let (first, second) = dongles.split_at_mut(index + 1);
-            (&mut first[index], &mut second[0])
+            (Some(&mut first[index]), Some(&mut second[0]))
         } else {
             let (first, second) = dongles.split_at_mut(index);
-            (&mut second[0], &mut first[0])
+            (Some(&mut second[0]), Some(&mut first[0]))
         }
     }
 
