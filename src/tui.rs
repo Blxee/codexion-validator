@@ -32,6 +32,7 @@ pub struct UserInterface {
 
 struct Test {
     id: usize,
+    args: String,
     description: String,
     state: TestState,
     stdout: Vec<String>,
@@ -40,7 +41,7 @@ struct Test {
 
 enum TestState {
     Running,
-    Failed { args: String, reason: String },
+    Failed { reason: String },
     Succeeded,
 }
 
@@ -75,6 +76,7 @@ impl UserInterface {
 
                     for Test {
                         id,
+                        args,
                         description,
                         state,
                         ..
@@ -91,7 +93,7 @@ impl UserInterface {
                                         description.into(),
                                     ])])),
                                 ],
-                                TestState::Failed { args, reason } => [
+                                TestState::Failed { reason } => [
                                     Cell::from(id.to_string()),
                                     Cell::from("[KO]".bold().red()),
                                     Cell::from(Text::from(vec![
@@ -115,7 +117,18 @@ impl UserInterface {
                                 TestState::Succeeded => [
                                     Cell::from(id.to_string()),
                                     Cell::from("[OK]".bold().green()),
-                                    Cell::from("won the game"),
+                                    Cell::from(Text::from(vec![
+                                        Line::from(vec![
+                                            "description".bold().underlined(),
+                                            ": ".into(),
+                                            description.into(),
+                                        ]),
+                                        Line::from(vec![
+                                            "arguments".bold().underlined(),
+                                            ": ".into(),
+                                            args.into(),
+                                        ]),
+                                    ])),
                                 ],
                             })
                             .height(3)
@@ -178,21 +191,21 @@ impl UserInterface {
         {
             let test = self.tests.get_mut(&id);
             match result {
-                TestResult::TestStarted { description } => {
+                TestResult::TestStarted { description, args } => {
                     self.tests.insert(
                         id,
                         Test {
                             id,
                             description,
+                            args,
                             state: TestState::Running,
                             stdout: Vec::new(),
                             stderr: Vec::new(),
                         },
                     );
                 }
-                TestResult::TestFailed { args, failure_kind } => {
+                TestResult::TestFailed { failure_kind } => {
                     test.unwrap().state = TestState::Failed {
-                        args,
                         reason: failure_kind.to_string(),
                     }
                 }

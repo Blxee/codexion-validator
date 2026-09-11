@@ -153,3 +153,19 @@ impl<'a> TryFrom<&'a str> for RawArgs<'a> {
         }
     }
 }
+
+impl<'a> Into<String> for RawArgs<'a> {
+    fn into(self) -> String {
+        [
+            self.number_of_coders,
+            self.time_to_burnout,
+            self.time_to_compile,
+            self.time_to_debug,
+            self.time_to_refactor,
+            self.number_of_compiles_required,
+            self.dongle_cooldown,
+            self.scheduler,
+        ]
+        .join(" ")
+    }
+}

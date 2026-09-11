@@ -51,6 +51,7 @@ impl<'a> CodexionInstance {
                     // if the timeout was reached, kill the child
                     if duration.is_zero() {
                         let _ = child_process.kill();
+                        let _ = child_process.wait();
                         return ProcessResult::TimedOut;
                     }
                 }
