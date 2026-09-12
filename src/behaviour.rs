@@ -14,7 +14,6 @@ pub struct CodexionState {
     earliest_burnout_coder_idx: usize,
     burn_out_reached: bool,
     action_duration_tolerance: Duration,
-    minimum_compiles: u32,
 }
 
 struct Coder {
@@ -72,6 +71,7 @@ pub enum BehaviourError {
 pub enum DongleTakingError {
     TooManyDongles,
     UnavailableDongle,
+    CoderCouldHaveTakenDongle { coder_id: u32, timestamp: Duration },
 }
 
 #[derive(Debug)]
@@ -108,10 +108,43 @@ impl Coder {
             compile_count: 0,
         }
     }
+
+    fn get_nearby_dongles<'a>(
+        &'a self,
+        dongles: &'a mut Vec<Dongle>,
+    ) -> (Option<&'a mut Dongle>, Option<&'a mut Dongle>) {
+        let index = CodexionState::id_to_index(self.id);
+        if dongles.len() == 1 {
+            (Some(&mut dongles[index]), None)
+        } else if index < dongles.len() - 1 {
+            let (first, second) = dongles.split_at_mut(index + 1);
+            (Some(&mut first[index]), Some(&mut second[0]))
+        } else {
+            let (first, second) = dongles.split_at_mut(index);
+            (Some(&mut second[0]), Some(&mut first[0]))
+        }
+    }
+
+    fn is_waiting_for_dongles(&self, timestamp: Duration, time_to_refactor: Duration) -> bool {
+        self.dongles_in_hand == 0
+            && match self.last_action {
+                None => true,
+                Some(Action::Refactor)
+                    if timestamp.saturating_sub(self.last_action_timestamp) > time_to_refactor =>
+                {
+                    true
+                }
+                _ => false,
+            }
+    }
 }
 
 trait AvailabilityProvider {
     fn availability(&self, timestamp: Duration) -> Availability;
+
+    fn available(&self, timestamp: Duration) -> bool {
+        matches!(self.availability(timestamp), Availability::Available)
+    }
 }
 
 impl AvailabilityProvider for Dongle {
@@ -140,6 +173,22 @@ impl AvailabilityProvider for Option<&mut Dongle> {
     }
 }
 
+impl AvailabilityProvider for (Option<&mut Dongle>, Option<&mut Dongle>) {
+    fn availability(&self, timestamp: Duration) -> Availability {
+        match (
+            self.0.availability(timestamp),
+            self.1.availability(timestamp),
+        ) {
+            (Availability::Available, Availability::Available) => Availability::Available,
+            (
+                Availability::Available | Availability::Unknown,
+                Availability::Available | Availability::Unknown,
+            ) => Availability::Unknown,
+            _ => Availability::Unavailable,
+        }
+    }
+}
+
 impl CodexionState {
     pub fn from(args: ProcessedArgs, action_duration_tolerance: Duration) -> Self {
         let mut coders = Vec::new();
@@ -161,7 +210,6 @@ impl CodexionState {
             earliest_burnout_coder_idx: 0,
             burn_out_reached: false,
             action_duration_tolerance,
-            minimum_compiles: 0,
         }
     }
 
@@ -219,6 +267,20 @@ impl CodexionState {
             {
                 result = Err(BehaviourError::InvalidCompilation(
                     CompilationError::CoderCouldHaveCompiled {
+                        coder_id: coder.id,
+                        timestamp: coder.last_action_timestamp,
+                    },
+                ));
+            }
+            if result.is_ok()
+                && coder.is_waiting_for_dongles(timestamp, self.args.time_to_refactor)
+                && coder
+                    .get_nearby_dongles(&mut self.dongles)
+                    .available(timestamp)
+                && !self.is_duration_within_tolerance(coder.last_action_timestamp, timestamp)
+            {
+                result = Err(BehaviourError::InvalidDongleTaking(
+                    DongleTakingError::CoderCouldHaveTakenDongle {
                         coder_id: coder.id,
                         timestamp: coder.last_action_timestamp,
                     },
@@ -295,8 +357,7 @@ impl CodexionState {
     fn update_dongles(&mut self, coder_id: u32, action: Action, timestamp: Duration) {
         let index = Self::id_to_index(coder_id);
         let coder = &self.coders[index];
-        let (left_dongle, right_dongle) =
-            Self::get_coder_nearby_dongles(coder_id, &mut self.dongles);
+        let (left_dongle, right_dongle) = coder.get_nearby_dongles(&mut self.dongles);
 
         match action {
             Action::DongleTaken => {
@@ -325,22 +386,6 @@ impl CodexionState {
         }
     }
 
-    fn get_coder_nearby_dongles(
-        coder_id: u32,
-        dongles: &mut Vec<Dongle>,
-    ) -> (Option<&mut Dongle>, Option<&mut Dongle>) {
-        let index = Self::id_to_index(coder_id);
-        if dongles.len() == 1 {
-            (Some(&mut dongles[index]), None)
-        } else if index < dongles.len() - 1 {
-            let (first, second) = dongles.split_at_mut(index + 1);
-            (Some(&mut first[index]), Some(&mut second[0]))
-        } else {
-            let (first, second) = dongles.split_at_mut(index);
-            (Some(&mut second[0]), Some(&mut first[0]))
-        }
-    }
-
     fn id_to_index(id: u32) -> usize {
         (id - 1) as usize
     }
@@ -351,8 +396,7 @@ impl CodexionState {
         timestamp: Duration,
     ) -> Result<(), BehaviourError> {
         let coder = &self.coders[Self::id_to_index(coder_id)];
-        let (left_dongle, right_dongle) =
-            Self::get_coder_nearby_dongles(coder_id, &mut self.dongles);
+        let (left_dongle, right_dongle) = coder.get_nearby_dongles(&mut self.dongles);
 
         match (coder.last_action, coder.dongles_in_hand) {
             // validate that taking a dongle
@@ -575,6 +619,14 @@ impl Display for BehaviourError {
             Behaviour::InvalidDongleTaking(DongleTakingError::TooManyDongles) => {
                 write!(f, "coder tried to take more than 2 dongles")
             }
+            Behaviour::InvalidDongleTaking(DongleTakingError::CoderCouldHaveTakenDongle {
+                coder_id,
+                timestamp,
+            }) => write!(
+                f,
+                "coder_{coder_id} should have a taken dongle at {} since both were available",
+                timestamp.as_millis()
+            ),
             Behaviour::InvalidCompilation(CompilationError::MissingDongles) => {
                 write!(f, "coder tried to compile while having less than 2 dongles")
             }
@@ -592,7 +644,7 @@ impl Display for BehaviourError {
                 timestamp,
             }) => write!(
                 f,
-                "coder_{coder_id} could have compiled at {} since he had 2 dongles",
+                "coder_{coder_id} should have compiled at {} since he had 2 dongles",
                 timestamp.as_millis()
             ),
             Behaviour::InvalidBurnout(BurnoutError::BurnoutNotDetected {

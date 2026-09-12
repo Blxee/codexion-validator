@@ -90,8 +90,8 @@ impl UserInterface {
                     } in self.tests.values()
                     {
                         rows.push(
-                            Row::new(match state {
-                                TestState::Running => [
+                            match state {
+                                TestState::Running => Row::new([
                                     Cell::from(id.to_string()),
                                     Cell::from("[..]".bold().yellow()),
                                     Cell::from(Text::from(vec![
@@ -106,8 +106,8 @@ impl UserInterface {
                                             args.into(),
                                         ]),
                                     ])),
-                                ],
-                                TestState::Failed { reason } => [
+                                ]),
+                                TestState::Failed { reason } => Row::new([
                                     Cell::from(id.to_string()),
                                     Cell::from("[KO]".bold().red()),
                                     Cell::from(Text::from(vec![
@@ -127,8 +127,9 @@ impl UserInterface {
                                             reason.into(),
                                         ]),
                                     ])),
-                                ],
-                                TestState::Succeeded => [
+                                ])
+                                .on_red(),
+                                TestState::Succeeded => Row::new([
                                     Cell::from(id.to_string()),
                                     Cell::from("[OK]".bold().green()),
                                     Cell::from(Text::from(vec![
@@ -143,8 +144,8 @@ impl UserInterface {
                                             args.into(),
                                         ]),
                                     ])),
-                                ],
-                            })
+                                ]),
+                            }
                             .height(3)
                             .bottom_margin(1),
                         );
