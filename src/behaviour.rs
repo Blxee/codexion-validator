@@ -86,6 +86,7 @@ pub enum CompilationError {
     MissingDongles,
     NotEnoughCompiles,
     ExceedingMaxCompiles,
+    CoderCouldHaveCompiled { coder_id: u32, timestamp: Duration },
 }
 
 #[derive(Debug)]
@@ -116,11 +117,11 @@ impl Coder {
     }
 }
 
-trait Availab {
+trait AvailabilityProvider {
     fn availability(&self, timestamp: Duration) -> Availability;
 }
 
-impl Availab for Dongle {
+impl AvailabilityProvider for Dongle {
     fn availability(&self, timestamp: Duration) -> Availability {
         match self.state {
             DongleState::Available => Availability::Available,
@@ -137,7 +138,7 @@ impl Availab for Dongle {
     }
 }
 
-impl Availab for Option<&mut Dongle> {
+impl AvailabilityProvider for Option<&mut Dongle> {
     fn availability(&self, timestamp: Duration) -> Availability {
         match self {
             Some(dongle) => dongle.availability(timestamp),
@@ -181,18 +182,20 @@ impl CodexionState {
             line_number,
         }: Event,
     ) -> Result<(), BehaviourError> {
+        let mut result = Ok(());
+
         // check whether a burnout already happened
         if self.burn_out_reached {
-            return Err(BehaviourError {
-                line,
+            result = Err(BehaviourError {
+                line: line.clone(),
                 line_number,
                 kind: BehaviourErrorKind::InvalidBurnout(BurnoutError::BurnoutAlreadyReached),
             });
         }
         // validate common event attributes
-        if timestamp < self.last_timestamp {
-            return Err(BehaviourError {
-                line,
+        if result.is_ok() && timestamp < self.last_timestamp {
+            result = Err(BehaviourError {
+                line: line.clone(),
                 line_number,
                 kind: BehaviourErrorKind::UnsynchronizedTimestamps {
                     last_timestamp: self.last_timestamp,
@@ -200,9 +203,9 @@ impl CodexionState {
                 },
             });
         }
-        if coder_id > self.args.number_of_coders {
-            return Err(BehaviourError {
-                line,
+        if result.is_ok() && coder_id > self.args.number_of_coders {
+            result = Err(BehaviourError {
+                line: line.clone(),
                 line_number,
                 kind: BehaviourErrorKind::InvalidCoderId {
                     max_id: self.args.number_of_coders,
@@ -213,12 +216,13 @@ impl CodexionState {
         // check whether a burnout should happen
         let earliest_burnout_timestamp =
             self.coders[self.earliest_burnout_coder_idx].last_compile_timestamp;
-        if timestamp.saturating_sub(earliest_burnout_timestamp)
-            > self.args.time_to_burnout + self.action_duration_tolerance
+        if result.is_ok()
+            && timestamp.saturating_sub(earliest_burnout_timestamp)
+                > self.args.time_to_burnout + self.action_duration_tolerance
         {
             self.burn_out_reached = true;
-            return Err(BehaviourError {
-                line,
+            result = Err(BehaviourError {
+                line: line.clone(),
                 line_number,
                 kind: BehaviourErrorKind::InvalidBurnout(BurnoutError::BurnoutNotDetected {
                     coder_id,
@@ -226,22 +230,42 @@ impl CodexionState {
                 }),
             });
         }
+        // check if a coder could have compiled
+        for coder in &self.coders {
+            if result.is_ok()
+                && coder.dongles_in_hand == 2
+                && matches!(coder.last_action, Some(Action::DongleTaken))
+                && !self.is_duration_within_tolerance(coder.last_action_timestamp, timestamp)
+            {
+                result = Err(BehaviourError {
+                    line: line.clone(),
+                    line_number,
+                    kind: BehaviourErrorKind::InvalidCompilation(
+                        CompilationError::CoderCouldHaveCompiled {
+                            coder_id: coder.id,
+                            timestamp: coder.last_action_timestamp,
+                        },
+                    ),
+                });
+            }
+        }
         // validate behaviour/logic according to action
-        let result = if let Err(kind) = match action {
-            Action::DongleTaken => self.validate_dongle_taking(coder_id, timestamp),
-            Action::Compile => self.validate_compiling(coder_id),
-            Action::Debug => self.validate_debugging(coder_id, timestamp),
-            Action::Refactor => self.validate_refactoring(coder_id, timestamp),
-            Action::Burnout => self.validate_burning_out(coder_id, timestamp),
-        } {
-            Err(BehaviourError {
+        if result.is_ok()
+            && let Err(kind) = match action {
+                Action::DongleTaken => self.validate_dongle_taking(coder_id, timestamp),
+                Action::Compile => self.validate_compiling(coder_id),
+                Action::Debug => self.validate_debugging(coder_id, timestamp),
+                Action::Refactor => self.validate_refactoring(coder_id, timestamp),
+                Action::Burnout => self.validate_burning_out(coder_id, timestamp),
+            }
+        {
+            result = Err(BehaviourError {
                 line,
                 line_number,
                 kind,
             })
-        } else {
-            Ok(())
         };
+
         // update state
         self.last_timestamp = timestamp;
         self.update_coder(coder_id, action, timestamp);
@@ -254,6 +278,9 @@ impl CodexionState {
     }
 
     pub fn finish(&self) -> Result<(), BehaviourError> {
+        if self.burn_out_reached {
+            return Ok(());
+        }
         let coder_with_least_compiles = self
             .coders
             .iter()
@@ -512,15 +539,28 @@ impl CodexionState {
         let minimum_time_to_burnout = last_compile_timestamp + self.args.time_to_burnout;
 
         if timestamp < minimum_time_to_burnout {
-            Err(BehaviourErrorKind::InvalidBurnout(
+            return Err(BehaviourErrorKind::InvalidBurnout(
                 BurnoutError::ShouldNotBurnout {
                     coder_id,
                     burnout_until: minimum_time_to_burnout,
                 },
-            ))
-        } else {
-            Ok(())
+            ));
         }
+
+        let coder = &self.coders[Self::id_to_index(coder_id)];
+
+        if coder.dongles_in_hand == 2
+            && matches!(coder.last_action, Some(Action::DongleTaken))
+            && !self.is_duration_within_tolerance(coder.last_action_timestamp, timestamp)
+        {
+            return Err(BehaviourErrorKind::InvalidCompilation(
+                CompilationError::CoderCouldHaveCompiled {
+                    coder_id,
+                    timestamp: coder.last_action_timestamp,
+                },
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -583,6 +623,14 @@ impl Display for BehaviourError {
             Behaviour::InvalidCompilation(CompilationError::NotEnoughCompiles) => {
                 write!(f, "one or more coders still need to compile")
             }
+            Behaviour::InvalidCompilation(CompilationError::CoderCouldHaveCompiled {
+                coder_id,
+                timestamp,
+            }) => write!(
+                f,
+                "coder_{coder_id} could have compiled at {} since he had 2 dongles",
+                timestamp.as_millis()
+            ),
             Behaviour::InvalidBurnout(BurnoutError::BurnoutNotDetected {
                 coder_id,
                 timestamp,

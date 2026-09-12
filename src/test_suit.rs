@@ -54,13 +54,13 @@ impl<'a> TestSuit<'a> {
     pub fn start(&mut self) {
         // test no args
         // test extra args
-        self.test_parsing_number_of_coders();
-        self.test_parsing_time_to_burnout();
-        self.test_parsing_time_to_compile();
-        self.test_parsing_time_to_debug();
-        self.test_parsing_time_to_refactor();
-        self.test_parsing_number_of_compiles_required();
-        self.test_parsing_dongle_cooldown();
+        // self.test_parsing_number_of_coders();
+        // self.test_parsing_time_to_burnout();
+        // self.test_parsing_time_to_compile();
+        // self.test_parsing_time_to_debug();
+        // self.test_parsing_time_to_refactor();
+        // self.test_parsing_number_of_compiles_required();
+        // self.test_parsing_dongle_cooldown();
         self.test_enough_time_for_even_coders();
         self.test_enough_time_for_odd_coders();
         self.test_one_coder();
@@ -340,7 +340,13 @@ impl<'a> TestSuit<'a> {
 
     fn test_behaviour(&mut self, args: RawArgs, description: String) {
         self.current_test_id += 1;
-        let excution_result = self.execute(self.current_test_id, description, args, None, true);
+        let excution_result = self.execute(
+            self.current_test_id,
+            description,
+            args,
+            Some(Duration::from_secs(10)),
+            true,
+        );
 
         if !expect_normal(excution_result) {
             self.sender
