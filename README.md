@@ -18,6 +18,13 @@ As of now, this moulinette tests:
 chmod +x codexion-validator
 ```
 
+or use the following drop-in command for direct download:
+
+```bash
+wget https://github.com/Blxee/codexion-validator/releases/download/0.1.1/codexion-validator
+chmod +x codexion-validator
+```
+
 ## Running the moulinette:
 
 To run it basically provide the path to the **codexion binary** as a first argument:
