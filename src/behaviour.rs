@@ -84,6 +84,7 @@ pub enum DongleTakingError {
 #[derive(Debug)]
 pub enum CompilationError {
     MissingDongles,
+    NotEnoughCompiles,
     ExceedingMaxCompiles,
 }
 
@@ -250,6 +251,23 @@ impl CodexionState {
         }
 
         result
+    }
+
+    pub fn finish(&self) -> Result<(), BehaviourError> {
+        let coder_with_least_compiles = self
+            .coders
+            .iter()
+            .map(|coder| coder.compile_count)
+            .min()
+            .unwrap();
+        if coder_with_least_compiles < self.args.number_of_compiles_required {
+            return Err(BehaviourError {
+                line: "".to_string(),
+                line_number: 0,
+                kind: BehaviourErrorKind::InvalidCompilation(CompilationError::NotEnoughCompiles),
+            });
+        }
+        Ok(())
     }
 
     fn update_coder(&mut self, coder_id: u32, action: Action, timestamp: Duration) {
@@ -561,6 +579,9 @@ impl Display for BehaviourError {
                     f,
                     "coder tried to compile even after everyone reached compiles required"
                 )
+            }
+            Behaviour::InvalidCompilation(CompilationError::NotEnoughCompiles) => {
+                write!(f, "one or more coders still need to compile")
             }
             Behaviour::InvalidBurnout(BurnoutError::BurnoutNotDetected {
                 coder_id,

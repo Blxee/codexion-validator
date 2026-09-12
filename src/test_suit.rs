@@ -266,6 +266,21 @@ impl<'a> TestSuit<'a> {
             }
         }
 
+        if let Some(state) = &mut state {
+            if let Err(err) = state.finish() {
+                err.to_string();
+                self.sender
+                    .send(TestMessage {
+                        test_id,
+                        result: TestResult::ProgressLine {
+                            fd: FileDescriptor::Stdout,
+                            line: err.to_string(),
+                        },
+                    })
+                    .unwrap();
+            }
+        }
+
         let mut stderr = String::new();
         for line in instance.stderr().unwrap().lines() {
             let line = line.unwrap();
