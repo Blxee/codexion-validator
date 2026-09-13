@@ -25,10 +25,11 @@ fn main() {
     let args = Args::parse();
 
     let (sender, receiver) = mpsc::channel();
-    thread::spawn(move || {
+    let handle = thread::spawn(move || {
         let mut test = TestSuit::new(&args.program_path, sender);
         test.start();
     });
     let mut ui = UserInterface::new(receiver);
     ui.render();
+    handle.join();
 }

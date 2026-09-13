@@ -125,12 +125,18 @@ impl Coder {
         }
     }
 
-    fn is_waiting_for_dongles(&self, timestamp: Duration, time_to_refactor: Duration) -> bool {
+    fn is_waiting_for_dongles(
+        &self,
+        timestamp: Duration,
+        time_to_refactor: Duration,
+        action_duration_tolerance: Duration,
+    ) -> bool {
         self.dongles_in_hand == 0
             && match self.last_action {
-                None => true,
+                None if timestamp > action_duration_tolerance => true,
                 Some(Action::Refactor)
-                    if timestamp.saturating_sub(self.last_action_timestamp) > time_to_refactor =>
+                    if self.last_action_timestamp + time_to_refactor
+                        > timestamp + action_duration_tolerance =>
                 {
                     true
                 }
@@ -273,11 +279,15 @@ impl CodexionState {
                 ));
             }
             if result.is_ok()
-                && coder.is_waiting_for_dongles(timestamp, self.args.time_to_refactor)
+                && !matches!(action, Action::DongleTaken)
+                && coder.is_waiting_for_dongles(
+                    timestamp,
+                    self.args.time_to_refactor,
+                    self.action_duration_tolerance,
+                )
                 && coder
                     .get_nearby_dongles(&mut self.dongles)
                     .available(timestamp)
-                && !self.is_duration_within_tolerance(coder.last_action_timestamp, timestamp)
             {
                 result = Err(BehaviourError::InvalidDongleTaking(
                     DongleTakingError::CoderCouldHaveTakenDongle {
